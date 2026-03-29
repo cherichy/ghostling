@@ -111,6 +111,8 @@ cmake --build build
 .\build\ghostling.exe      # Windows
 ```
 
+You can also build with **`zig build`** (see [AGENTS.md](AGENTS.md) for raylib flags and Windows `native-windows-gnu` defaults). Output goes to `zig-out/` by default; run with `zig build run`. **`zig build` defaults to ReleaseFast** because libghostty-vt in Debug is very slow; use `-Doptimize=Debug` only when you need it.
+
 On Windows, ghostling uses ConPTY and auto-detects the best available
 shell (pwsh > powershell > cmd). Pass a shell path as the first argument
 to override (e.g. `ghostling.exe C:\Windows\System32\cmd.exe`).

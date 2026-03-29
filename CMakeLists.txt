@@ -28,6 +28,7 @@ endif()
 # The Ghostty CMakeLists.txt delegates to `zig build lib-vt` to produce the
 # shared library. See https://ghostty.org/docs/install/build for the
 # required Zig version.
+# Keep GIT_TAG in sync with the ghostty dependency in build.zig.zon (Zig build).
 FetchContent_Declare(ghostty
   GIT_REPOSITORY https://github.com/ghostty-org/ghostty.git
   GIT_TAG bebca84668947bfc92b9a30ed58712e1c34eee1d
@@ -54,6 +55,8 @@ add_custom_command(
 add_executable(${PROJECT_NAME} main.c "${FONT_HEADER}")
 target_compile_features(${PROJECT_NAME} PRIVATE c_std_11)
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}")
+# ghostty-vt = shared libghostty-vt (DLL + import lib on Windows). Use
+# ghostty-vt-static for fully static linking if you add that target.
 target_link_libraries(${PROJECT_NAME} raylib ghostty-vt)
 
 # Build as a GUI subsystem app on Windows so we don't get a console window.
