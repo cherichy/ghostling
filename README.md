@@ -75,7 +75,7 @@ emulation layer, such as:
 - Multiple windows
 - Splits
 - Session management
-- Configuration file or GUI
+- Full GUI preferences editor (this fork supports a small text config for font path/size; see [CONFIG.md](CONFIG.md))
 - Search UI (although search internals are provided by libghostty-vt)
 
 These are the things that libghostty consumers are expected to implement
@@ -114,6 +114,11 @@ cmake --build build
 On Windows, ghostling uses ConPTY and auto-detects the best available
 shell (pwsh > powershell > cmd). Pass a shell path as the first argument
 to override (e.g. `ghostling.exe C:\Windows\System32\cmd.exe`).
+
+### Configuration (font)
+
+Font path and size are read at startup from a plain-text file. See
+[CONFIG.md](CONFIG.md) (Chinese) for paths, keys, and examples.
 
 > [!WARNING]
 >
