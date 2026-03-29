@@ -2,7 +2,7 @@
 
 Ghostling is a demo project meant to highlight a minimum
 functional terminal built on the libghostty C API in a
-[single C file](https://github.com/ghostty-org/ghostling/blob/main/main.c).
+[C sources under `src/c/`](https://github.com/ghostty-org/ghostling/tree/main/src/c) (entry `main.c`).
 
 The example uses Raylib for windowing and rendering. It uses a 2D graphics renderer
 instead of a direct GPU renderer like the primary [Ghostty](https://ghostty.org) GUI. This is to
@@ -111,7 +111,7 @@ cmake --build build
 .\build\ghostling.exe      # Windows
 ```
 
-You can also build with **`zig build`** (see [AGENTS.md](AGENTS.md) for raylib flags and Windows `native-windows-gnu` defaults). Output goes to `zig-out/` by default; run with `zig build run`. **`zig build` defaults to ReleaseFast** because libghostty-vt in Debug is very slow; use `-Doptimize=Debug` only when you need it.
+You can also build the **same C app** with **`zig build`** (see [AGENTS.md](AGENTS.md) for raylib flags). Output goes to `zig-out/`; run with `zig build run`. **`zig build` defaults to ReleaseFast** because libghostty-vt in Debug is very slow; use `-Doptimize=Debug` only when you need it.
 
 On Windows, ghostling uses ConPTY and auto-detects the best available
 shell (pwsh > powershell > cmd). Pass a shell path as the first argument

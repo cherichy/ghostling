@@ -12,7 +12,7 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "main.c",
+        "src",
         "tools",
         "fonts",
         "README.md",

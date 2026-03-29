@@ -25,4 +25,4 @@ zig build \
 `zig build -Draylib-prefix=/c/Scoop/apps/msys2/current/ucrt64`（路径按实际安装调整）。
 
 ## 字体文件
-`C:\Scoop\apps\Maple-Mono-NF-CN\7.9\`
+仓库内默认使用 **`fonts/MapleMono-NF-CN-Regular.ttf`**（已随仓库提供）。若从 `build/` 等子目录启动且找不到该相对路径，可在配置文件里写绝对路径。

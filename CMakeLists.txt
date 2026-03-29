@@ -52,9 +52,25 @@ add_custom_command(
 )
 
 # --- Our Project -------------------------------------------------------------
-add_executable(${PROJECT_NAME} main.c "${FONT_HEADER}")
+set(GHOSTLING_C_SOURCES
+  src/c/main.c
+  src/c/pty_common.c
+  src/c/config_font.c
+  src/c/effects.c
+  src/c/terminal_ui.c
+)
+if(WIN32)
+  list(APPEND GHOSTLING_C_SOURCES src/c/pty_win.c)
+else()
+  list(APPEND GHOSTLING_C_SOURCES src/c/pty_unix.c)
+endif()
+
+add_executable(${PROJECT_NAME} ${GHOSTLING_C_SOURCES} "${FONT_HEADER}")
 target_compile_features(${PROJECT_NAME} PRIVATE c_std_11)
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}")
+target_include_directories(${PROJECT_NAME} PRIVATE
+  "${CMAKE_BINARY_DIR}"
+  "${CMAKE_SOURCE_DIR}/src/c"
+)
 # ghostty-vt = shared libghostty-vt (DLL + import lib on Windows). Use
 # ghostty-vt-static for fully static linking if you add that target.
 target_link_libraries(${PROJECT_NAME} raylib ghostty-vt)

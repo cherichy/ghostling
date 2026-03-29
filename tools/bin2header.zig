@@ -1,5 +1,6 @@
-//! Emit a C header with `static const unsigned char NAME[] = { ... };`
-//! from a binary file. Args: <input_path> <output_path> <array_name>
+//! Emit either a C header (`static const unsigned char NAME[] = { ... };`) or a Zig
+//! module (`pub const NAME = [_]u8{ ... };`) when `<output_path>` ends with `.zig`.
+//! Args: <input_path> <output_path> <array_name>
 const std = @import("std");
 
 pub fn main() !void {
@@ -24,8 +25,14 @@ pub fn main() !void {
     var list = std.array_list.Managed(u8).init(alloc);
     defer list.deinit();
 
-    try list.writer().print("// Auto-generated from {s} — do not edit.\n", .{input_path});
-    try list.writer().print("static const unsigned char {s}[] = {{\n    ", .{array_name});
+    const zig_out = std.mem.endsWith(u8, output_path, ".zig");
+    if (zig_out) {
+        try list.writer().print("//! Auto-generated from {s} — do not edit.\n", .{input_path});
+        try list.writer().print("pub const {s} = [_]u8{{\n    ", .{array_name});
+    } else {
+        try list.writer().print("// Auto-generated from {s} — do not edit.\n", .{input_path});
+        try list.writer().print("static const unsigned char {s}[] = {{\n    ", .{array_name});
+    }
 
     for (data, 0..) |byte, i| {
         if (i > 0) {

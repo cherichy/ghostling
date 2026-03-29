@@ -1,6 +1,6 @@
 # Ghostling 配置文件说明
 
-程序启动时会读取一个纯文本配置文件，用来设置**字体路径**和**字号**。不创建配置文件也可以运行：Windows 上会尝试使用内置的默认 Maple Mono 路径；若磁盘字体加载失败，会回退到程序内嵌的 JetBrains Mono（**不含中文大字集**，中文可能仍显示为缺字）。
+程序启动时会读取一个纯文本配置文件，用来设置**字体路径**和**字号**。不创建配置文件也可以运行：会优先尝试仓库内的 **`fonts/MapleMono-NF-CN-Regular.ttf`**（相对**当前工作目录**）；若该路径不可读或加载失败，C 构建会回退到内嵌 JetBrains Mono，Zig 构建同样会回退到内嵌字体（**不含中文大字集**，中文可能仍显示为缺字）。
 
 ---
 
@@ -29,8 +29,9 @@
 
 - **含义**：终端渲染使用的 TrueType 字体文件的完整路径。
 - **建议**：使用等宽、且包含你需要字符集的字体（例如含中文的 Maple Mono NF CN、Sarasa、Noto Sans Mono CJK 等）。
-- **Windows 路径示例**：  
-  `font_path = C:\Scoop\apps\Maple-Mono-NF-CN\7.9\MapleMono-NF-CN-Regular.ttf`
+- **路径示例**（也可用任意绝对路径）：  
+  `font_path = fonts/MapleMono-NF-CN-Regular.ttf`（需在仓库根目录下启动，或把 `fonts` 放在当前工作目录下）  
+  `font_path = C:\path\to\MapleMono-NF-CN-Regular.ttf`
 - **注意**：
   - 路径中有空格时，当前实现**不要**加引号，整段路径写在等号右侧即可（行首到行尾会先去掉首尾空白）。
   - 若路径指向的文件不存在或无法读取，程序会在标准错误输出提示，并改用**内嵌字体**（对中文支持有限）。
@@ -50,13 +51,13 @@
 
 ```text
 # Ghostling 配置
-font_path = C:\Scoop\apps\Maple-Mono-NF-CN\7.9\MapleMono-NF-CN-Regular.ttf
+font_path = fonts/MapleMono-NF-CN-Regular.ttf
 ```
 
 **同时指定字号：**
 
 ```text
-font_path = C:\Scoop\apps\Maple-Mono-NF-CN\7.9\MapleMono-NF-CN-Regular.ttf
+font_path = fonts/MapleMono-NF-CN-Regular.ttf
 font_size = 14
 ```
 
@@ -69,11 +70,11 @@ font_size = 16
 
 ---
 
-## 与默认行为的关系（Windows）
+## 与默认行为的关系
 
 1. 若**存在**配置文件且其中设置了 **`font_path`**（且值非空），则优先使用该路径。
-2. 若配置文件不存在，或存在但未设置 `font_path`，则 Windows 构建会尝试使用编译时约定的 **Scoop Maple Mono 路径**（与 `main.c` 中 `GHOSTLING_DEFAULT_FONT_PATH` 一致；Scoop 升级版本号后若路径变了，请在配置里显式写 `font_path`）。
-3. 非 Windows 系统：若未配置 `font_path`，则不会使用上述 Maple 路径，仅使用内嵌字体（适合仅需拉丁字符的场景）。
+2. 若配置文件不存在，或存在但未设置 `font_path`，则使用默认 **`fonts/MapleMono-NF-CN-Regular.ttf`**（与源码中 `GHOSTLING_DEFAULT_FONT_PATH` / Zig `configLoad` 一致）。请从仓库根目录运行，或自行在配置里写绝对路径。
+3. 若默认路径仍无法加载字体，则回退到内嵌 JetBrains Mono（见上文）。
 
 ---
 

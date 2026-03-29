@@ -12,23 +12,21 @@
 - Run: `./build/ghostling` or `.\build\ghostling.exe` (Windows)
 - Clean: `cmake --build build --target clean`
 
-### Zig (`build.zig`)
+### Zig (`build.zig`) — C binary only
 
-- Fetches **ghostty** via `build.zig.zon` (same git revision as `CMakeLists.txt` — keep them in sync when bumping libghostty).
+- Builds the **same C sources** as CMake (`src/c/*.c`), not a second implementation. Fetches **ghostty** via `build.zig.zon` (keep revision in sync with `CMakeLists.txt` when bumping libghostty).
 - Generates `font_jetbrains_mono.h` with `tools/bin2header.zig` (same idea as `bin2header.cmake`).
-- **Raylib** is not a Zig dependency; point the build at an install or a CMake-built static library:
-  - System / MSYS2:  
-    `zig build -Draylib-prefix=C:/msys64/ucrt64` (adjust to your prefix; needs `include/raylib.h` and `lib/libraylib.a` or import libs).
-  - Reuse CMake FetchContent output (after `cmake --build build` once):  
-    `zig build -Draylib-lib=build/_deps/raylib-build/raylib/libraylib.a -Draylib-include=build/_deps/raylib-src/src`
-- On **Windows**, the default target is `native-windows-gnu` when you omit `-Dtarget`, so linking matches typical MinGW raylib and avoids Zig’s MSVC libc setup unless you opt in with `-Dtarget=x86_64-windows-msvc`.
-- **Optimization**: plain `zig build` defaults to **ReleaseFast** (Debug libghostty-vt is unusably slow). Use `-Doptimize=Debug` only when you need symbols; `--release=safe` / `--release=small` still map to ReleaseSafe / ReleaseSmall.
-- **libghostty-vt** is linked **dynamically** (same idea as CMake’s `ghostty-vt` imported shared library). `zig build` installs `ghostty-vt.dll` next to `ghostling.exe` under `zig-out/bin/` on Windows; on Linux/macOS the shared library goes under `zig-out/lib/` with an rpath on the exe so `zig build run` still works.
-- Install prefix defaults to `zig-out/`; run: `zig build run` (after a successful `zig build`).
+- **Raylib**: point the build at MSYS2 or a CMake raylib tree, e.g.  
+  `zig build -Draylib-prefix=C:/Scoop/apps/msys2/current/ucrt64`  
+  or `-Draylib-lib=... -Draylib-include=...` (see `-h` for options).
+- On **Windows**, default target is `native-windows-gnu` unless you pass `-Dtarget=...`.
+- **Optimization**: `zig build` defaults to **ReleaseFast** for libghostty-vt; use `-Doptimize=Debug` when you need symbols.
+- **libghostty-vt** is dynamic; `zig build` installs `ghostling` and the shared library under `zig-out/` (same layout idea as CMake). Run: `zig build run`.
+- Step `ghostling-c` is an alias for the default install (historical name).
 
 ## Code Conventions
 
-- C (not C++), single-file project in `main.c`
+- C (not C++). Entry point is `src/c/main.c`; PTY, config/font, effects, and terminal UI live under `src/c/`.
 - Never put side-effect calls inside `assert()` — removed in release builds
 - Comment heavily — explain *why*, not just *what*
 
