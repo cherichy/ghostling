@@ -57,6 +57,7 @@ set(GHOSTLING_C_SOURCES
   src/c/pty_common.c
   src/c/config_font.c
   src/c/effects.c
+  src/c/tabs.c
   src/c/terminal_ui.c
 )
 if(WIN32)

@@ -21,8 +21,13 @@ zig build \
 ```
 产物在 `zig-out/bin/`：`ghostling.exe` 与 `ghostty-vt.dll` 会一起安装，一般无需再手动 `cp` DLL。
 
-若已在 MSYS2 安装 raylib，可简化为：
-`zig build -Draylib-prefix=/c/Scoop/apps/msys2/current/ucrt64`（路径按实际安装调整）。
+若已在 MSYS2（Scoop）安装 raylib，推荐在仓库根目录用（路径按实际安装调整）：
+
+```bash
+zig build -Draylib-prefix="C:/Scoop/apps/msys2/current/ucrt64"
+```
+
+Git Bash 下也可写成 `-Draylib-prefix=/c/Scoop/apps/msys2/current/ucrt64`。
 
 ## 字体文件
 仓库内默认使用 **`fonts/MapleMono-NF-CN-Regular.ttf`**（已随仓库提供）。若从 `build/` 等子目录启动且找不到该相对路径，可在配置文件里写绝对路径。

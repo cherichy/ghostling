@@ -4,7 +4,7 @@
 
 - Requires CMake 3.19+, Ninja, a C compiler, and Zig **0.15.2+** on PATH
 
-### CMake (default)
+### CMake (lagecy)
 
 - Configure: `cmake -B build -G Ninja`
 - Build: `cmake --build build`
@@ -12,13 +12,13 @@
 - Run: `./build/ghostling` or `.\build\ghostling.exe` (Windows)
 - Clean: `cmake --build build --target clean`
 
-### Zig (`build.zig`) — C binary only
+### Zig (`build.zig`) — default
 
 - Builds the **same C sources** as CMake (`src/c/*.c`), not a second implementation. Fetches **ghostty** via `build.zig.zon` (keep revision in sync with `CMakeLists.txt` when bumping libghostty).
 - Generates `font_jetbrains_mono.h` with `tools/bin2header.zig` (same idea as `bin2header.cmake`).
-- **Raylib**: point the build at MSYS2 or a CMake raylib tree, e.g.  
-  `zig build -Draylib-prefix=C:/Scoop/apps/msys2/current/ucrt64`  
-  or `-Draylib-lib=... -Draylib-include=...` (see `-h` for options).
+- **Raylib (Windows / Scoop MSYS2 UCRT64)**: use this when compiling from the repo root so raylib headers and MinGW import stubs resolve correctly:  
+  `zig build -Draylib-prefix="C:/Scoop/apps/msys2/current/ucrt64"`
+- **Raylib (other layouts)**: `-Draylib-lib=... -Draylib-include=...` (see `zig build -h`).
 - On **Windows**, default target is `native-windows-gnu` unless you pass `-Dtarget=...`.
 - **Optimization**: `zig build` defaults to **ReleaseFast** for libghostty-vt; use `-Doptimize=Debug` when you need symbols.
 - **libghostty-vt** is dynamic; `zig build` installs `ghostling` and the shared library under `zig-out/` (same layout idea as CMake). Run: `zig build run`.

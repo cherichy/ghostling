@@ -8,15 +8,18 @@
 void log_build_info(void);
 void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
                   GhosttyMouseEvent event, GhosttyTerminal terminal,
-                  int cell_width, int cell_height, int pad);
+                  int cell_width, int cell_height, int pad_left, int pad_top,
+                  int pad_right, int pad_bottom);
 void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
                   GhosttyKeyEvent event, GhosttyTerminal terminal);
 bool handle_scrollbar(GhosttyTerminal terminal, GhosttyRenderState render_state,
-                      bool *dragging);
+                      bool *dragging, int grid_origin_x, int grid_origin_y,
+                      uint16_t term_rows, int cell_height, int pad_right);
 void render_terminal(GhosttyRenderState render_state,
                      GhosttyRenderStateRowIterator row_iter,
                      GhosttyRenderStateRowCells cells, Font font,
                      int cell_width, int cell_height, int font_size,
-                     const GhosttyTerminalScrollbar *scrollbar);
+                     const GhosttyTerminalScrollbar *scrollbar, int grid_origin_x,
+                     int grid_origin_y, uint16_t term_rows, int pad_right);
 
 #endif

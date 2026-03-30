@@ -73,6 +73,7 @@ pub fn build(b: *std.Build) void {
         "src/c/pty_win.c",
         "src/c/config_font.c",
         "src/c/effects.c",
+        "src/c/tabs.c",
         "src/c/terminal_ui.c",
     } else &.{
         "src/c/main.c",
@@ -80,6 +81,7 @@ pub fn build(b: *std.Build) void {
         "src/c/pty_unix.c",
         "src/c/config_font.c",
         "src/c/effects.c",
+        "src/c/tabs.c",
         "src/c/terminal_ui.c",
     };
     const c_flags: []const []const u8 = if (target.result.os.tag == .linux)

@@ -190,7 +190,8 @@ static void mouse_encode_and_write(PtyHandle pty_fd, GhosttyMouseEncoder encoder
 
 void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
                   GhosttyMouseEvent event, GhosttyTerminal terminal,
-                  int cell_width, int cell_height, int pad)
+                  int cell_width, int cell_height, int pad_left, int pad_top,
+                  int pad_right, int pad_bottom)
 {
     ghostty_mouse_encoder_setopt_from_terminal(encoder, terminal);
 
@@ -202,10 +203,10 @@ void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
         .screen_height = (uint32_t)scr_h,
         .cell_width = (uint32_t)cell_width,
         .cell_height = (uint32_t)cell_height,
-        .padding_top = (uint32_t)pad,
-        .padding_bottom = (uint32_t)pad,
-        .padding_left = (uint32_t)pad,
-        .padding_right = (uint32_t)pad,
+        .padding_top = (uint32_t)pad_top,
+        .padding_bottom = (uint32_t)pad_bottom,
+        .padding_left = (uint32_t)pad_left,
+        .padding_right = (uint32_t)pad_right,
     };
     ghostty_mouse_encoder_setopt(encoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE,
                                  &enc_size);
@@ -380,8 +381,16 @@ void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
 }
 
 bool handle_scrollbar(GhosttyTerminal terminal, GhosttyRenderState render_state,
-                      bool *dragging)
+                      bool *dragging, int grid_origin_x, int grid_origin_y,
+                      uint16_t term_rows, int cell_height, int pad_right)
 {
+    Vector2 mpos = GetMousePosition();
+    if (mpos.x < (float)grid_origin_x) {
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT))
+            *dragging = false;
+        return false;
+    }
+
     GhosttyTerminalScrollbar scrollbar = {0};
     if (ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR,
                              &scrollbar) != GHOSTTY_SUCCESS)
@@ -393,21 +402,24 @@ bool handle_scrollbar(GhosttyTerminal terminal, GhosttyRenderState render_state,
     }
 
     int scr_w = GetScreenWidth();
-    int scr_h = GetScreenHeight();
+    int track_h = (int)term_rows * cell_height;
+    if (track_h < 1)
+        track_h = 1;
+
     const int bar_width = 6;
     const int bar_margin = 2;
-    int bar_left = scr_w - bar_width - bar_margin;
+    int bar_left = scr_w - pad_right - bar_width - bar_margin;
     int hit_left = bar_left - 8;
-    Vector2 mpos = GetMousePosition();
-
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && mpos.x >= hit_left &&
-        mpos.x <= scr_w) {
+        mpos.x <= scr_w && mpos.y >= (float)grid_origin_y &&
+        mpos.y <= (float)(grid_origin_y + track_h)) {
         *dragging = true;
     }
 
     if (*dragging && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
         uint64_t scrollable = scrollbar.total - scrollbar.len;
-        double frac = (double)mpos.y / (double)scr_h;
+        double frac =
+            ((double)mpos.y - (double)grid_origin_y) / (double)track_h;
         if (frac < 0.0)
             frac = 0.0;
         if (frac > 1.0)
@@ -435,7 +447,8 @@ void render_terminal(GhosttyRenderState render_state,
                      GhosttyRenderStateRowIterator row_iter,
                      GhosttyRenderStateRowCells cells, Font font,
                      int cell_width, int cell_height, int font_size,
-                     const GhosttyTerminalScrollbar *scrollbar)
+                     const GhosttyTerminalScrollbar *scrollbar, int grid_origin_x,
+                     int grid_origin_y, uint16_t term_rows, int pad_right)
 {
     GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
     if (ghostty_render_state_colors_get(render_state, &colors) !=
@@ -447,8 +460,7 @@ void render_terminal(GhosttyRenderState render_state,
                                  &row_iter) != GHOSTTY_SUCCESS)
         return;
 
-    const int pad = 4;
-    int y = pad;
+    int y = grid_origin_y;
 
     while (ghostty_render_state_row_iterator_next(row_iter)) {
         if (ghostty_render_state_row_get(row_iter,
@@ -456,7 +468,7 @@ void render_terminal(GhosttyRenderState render_state,
                                          &cells) != GHOSTTY_SUCCESS)
             continue;
 
-        int x = pad;
+        int x = grid_origin_x;
 
         while (ghostty_render_state_row_cells_next(cells)) {
             uint32_t grapheme_len = 0;
@@ -562,31 +574,37 @@ void render_terminal(GhosttyRenderState render_state,
         GhosttyColorRgb cur_rgb = colors.foreground;
         if (colors.cursor_has_value)
             cur_rgb = colors.cursor;
-        int cur_x = pad + cx * cell_width;
-        int cur_y = pad + cy * cell_height;
+        int cur_x = grid_origin_x + cx * cell_width;
+        int cur_y = grid_origin_y + cy * cell_height;
         DrawRectangle(cur_x, cur_y, cell_width, cell_height,
                       (Color){cur_rgb.r, cur_rgb.g, cur_rgb.b, 128});
     }
 
     if (scrollbar && scrollbar->total > scrollbar->len) {
         int scr_w = GetScreenWidth();
-        int scr_h = GetScreenHeight();
+        int track_h = (int)term_rows * cell_height;
+        if (track_h < 1)
+            track_h = 1;
 
         const int bar_width = 6;
         const int bar_margin = 2;
-        int bar_x = scr_w - bar_width - bar_margin;
+        int bar_x = scr_w - pad_right - bar_width - bar_margin;
 
         double visible_frac = (double)scrollbar->len / (double)scrollbar->total;
-        int thumb_height = (int)(scr_h * visible_frac);
+        int thumb_height = (int)((double)track_h * visible_frac);
         if (thumb_height < 10)
             thumb_height = 10;
+        if (thumb_height > track_h)
+            thumb_height = track_h;
 
         double scroll_frac =
             (scrollbar->total > scrollbar->len)
                 ? (double)scrollbar->offset /
                       (double)(scrollbar->total - scrollbar->len)
                 : 1.0;
-        int thumb_y = (int)(scroll_frac * (scr_h - thumb_height));
+        int thumb_y =
+            grid_origin_y +
+            (int)(scroll_frac * (double)(track_h - thumb_height));
 
         DrawRectangle(bar_x, thumb_y, bar_width, thumb_height,
                       (Color){200, 200, 200, 128});

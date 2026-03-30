@@ -3,25 +3,72 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* raylib before Win32 headers: GDI/User declare names (Rectangle, CloseWindow,
+ * ShowCursor) that collide with raylib's API if windows.h is included first. */
+#include "raylib.h"
+
 #ifdef _WIN32
-#include "pty_win.h"
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOGDI
+#define NOGDI
+#endif
+#ifndef NOUSER
+#define NOUSER
+#endif
 #include <windows.h>
 #else
-#include "pty_unix.h"
 #include <signal.h>
-#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
-
-#include "raylib.h"
 #include <ghostty/vt.h>
 
 #include "font_jetbrains_mono.h"
 
 #include "config_font.h"
 #include "effects.h"
+#include "tabs.h"
 #include "terminal_ui.h"
+
+static void layout_terms(int scr_w, int scr_h, int cell_width, int cell_height,
+                         int pad, uint16_t *term_cols, uint16_t *term_rows,
+                         int *grid_origin_x, int *grid_origin_y)
+{
+    *grid_origin_x = TAB_STRIP_W + pad;
+    *grid_origin_y = pad;
+    int content_w = scr_w - *grid_origin_x - pad;
+    int content_h = scr_h - 2 * pad;
+    int cols = content_w / cell_width;
+    int rows = content_h / cell_height;
+    if (cols < 1)
+        cols = 1;
+    if (rows < 1)
+        rows = 1;
+    *term_cols = (uint16_t)cols;
+    *term_rows = (uint16_t)rows;
+}
+
+static void close_tab_at(Tab **tabs, size_t *n_tabs, size_t *active, size_t idx)
+{
+    if (*n_tabs <= 1)
+        return;
+
+    tab_free(tabs[idx]);
+    free(tabs[idx]);
+    memmove(&tabs[idx], &tabs[idx + 1],
+            (*n_tabs - 1 - idx) * sizeof(Tab *));
+    (*n_tabs)--;
+    tabs[*n_tabs] = NULL;
+
+    if (*active == idx) {
+        if (idx >= *n_tabs)
+            *active = *n_tabs > 0 ? *n_tabs - 1 : 0;
+    } else if (*active > idx) {
+        (*active)--;
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -68,28 +115,36 @@ int main(int argc, char *argv[])
 
     const int pad = 4;
 
+    Tab *tab_list[MAX_TABS];
+    memset(tab_list, 0, sizeof(tab_list));
+    size_t n_tabs = 0;
+    size_t active = 0;
+
     int scr_w = GetScreenWidth();
     int scr_h = GetScreenHeight();
-    uint16_t term_cols = (uint16_t)((scr_w - 2 * pad) / cell_width);
-    uint16_t term_rows = (uint16_t)((scr_h - 2 * pad) / cell_height);
-    if (term_cols < 1)
-        term_cols = 1;
-    if (term_rows < 1)
-        term_rows = 1;
+    uint16_t term_cols = 1;
+    uint16_t term_rows = 1;
+    int grid_origin_x = TAB_STRIP_W + pad;
+    int grid_origin_y = pad;
+    layout_terms(scr_w, scr_h, cell_width, cell_height, pad, &term_cols,
+                 &term_rows, &grid_origin_x, &grid_origin_y);
 
-    GhosttyTerminal terminal = NULL;
-#ifdef _WIN32
-    PtyContext pty_ctx = {.hpc = INVALID_HANDLE_VALUE,
-                          .process = INVALID_HANDLE_VALUE,
-                          .pipe_in = INVALID_HANDLE_VALUE,
-                          .pipe_out = INVALID_HANDLE_VALUE};
-    PtyReadBuf pty_rb = {0};
-    InitializeCriticalSection(&pty_rb.cs);
-    HANDLE pty_reader = NULL;
-#else
-    pid_t child = -1;
-    int pty_fd = -1;
-#endif
+    tab_list[0] = malloc(sizeof(Tab));
+    if (!tab_list[0]) {
+        fprintf(stderr, "ghostling: out of memory\n");
+        UnloadFont(mono_font);
+        CloseWindow();
+        return 1;
+    }
+    if (!tab_start_shell(tab_list[0], term_cols, term_rows, cell_width,
+                         cell_height, shell_override)) {
+        free(tab_list[0]);
+        UnloadFont(mono_font);
+        CloseWindow();
+        return 1;
+    }
+    n_tabs = 1;
+
     GhosttyKeyEncoder key_encoder = NULL;
     GhosttyKeyEvent key_event = NULL;
     GhosttyMouseEncoder mouse_encoder = NULL;
@@ -99,65 +154,7 @@ int main(int argc, char *argv[])
     GhosttyRenderStateRowCells row_cells = NULL;
     int exit_code = 0;
 
-    GhosttyTerminalOptions opts = {.cols = term_cols,
-                                   .rows = term_rows,
-                                   .max_scrollback = 1000};
-    GhosttyResult err = ghostty_terminal_new(NULL, &terminal, opts);
-    if (err != GHOSTTY_SUCCESS) {
-        fprintf(stderr, "ghostty_terminal_new failed (%d)\n", err);
-        exit_code = 1;
-        goto cleanup;
-    }
-
-#ifdef _WIN32
-    if (!pty_spawn_win32(&pty_ctx, term_cols, term_rows, shell_override)) {
-        exit_code = 1;
-        goto cleanup;
-    }
-    pty_rb.pipe = pty_ctx.pipe_out;
-    pty_reader = CreateThread(NULL, 0, pty_reader_thread, &pty_rb, 0, NULL);
-    if (!pty_reader) {
-        win_perror("CreateThread (pty reader)");
-        exit_code = 1;
-        goto cleanup;
-    }
-    PtyHandle pty_wr = pty_ctx.pipe_in;
-#else
-    pty_fd = pty_spawn_unix(&child, term_cols, term_rows, shell_override,
-                            cell_width, cell_height);
-    if (pty_fd < 0) {
-        exit_code = 1;
-        goto cleanup;
-    }
-    PtyHandle pty_wr = pty_fd;
-#endif
-
-#ifdef _WIN32
-    EffectsContext effects_ctx = {.pty_fd = pty_ctx.pipe_in,
-#else
-    EffectsContext effects_ctx = {.pty_fd = pty_fd,
-#endif
-                                  .cell_width = cell_width,
-                                  .cell_height = cell_height,
-                                  .cols = term_cols,
-                                  .rows = term_rows};
-
-    ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_USERDATA, &effects_ctx);
-
-    ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_WRITE_PTY,
-                         (const void *)effect_write_pty);
-    ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SIZE,
-                         (const void *)effect_size);
-    ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES,
-                         (const void *)effect_device_attributes);
-    ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_XTVERSION,
-                         (const void *)effect_xtversion);
-    ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
-                         (const void *)effect_title_changed);
-    ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
-                         (const void *)effect_color_scheme);
-
-    err = ghostty_key_encoder_new(NULL, &key_encoder);
+    GhosttyResult err = ghostty_key_encoder_new(NULL, &key_encoder);
     if (err != GHOSTTY_SUCCESS) {
         fprintf(stderr, "ghostty_key_encoder_new failed (%d)\n", err);
         exit_code = 1;
@@ -211,39 +208,20 @@ int main(int argc, char *argv[])
     int prev_height = scr_h;
     bool prev_focused = IsWindowFocused();
     bool scrollbar_dragging = false;
-    bool child_exited = false;
-    bool child_reaped = false;
-    int child_exit_status = -1;
 
     while (!WindowShouldClose()) {
+        scr_w = GetScreenWidth();
+        scr_h = GetScreenHeight();
+
         if (IsWindowResized()) {
-            int w = GetScreenWidth();
-            int h = GetScreenHeight();
+            int w = scr_w;
+            int h = scr_h;
             if (w != prev_width || h != prev_height) {
-                int cols = (w - 2 * pad) / cell_width;
-                int rows = (h - 2 * pad) / cell_height;
-                if (cols < 1)
-                    cols = 1;
-                if (rows < 1)
-                    rows = 1;
-                term_cols = (uint16_t)cols;
-                term_rows = (uint16_t)rows;
-                ghostty_terminal_resize(terminal, term_cols, term_rows,
-                                        (uint32_t)cell_width,
-                                        (uint32_t)cell_height);
-                effects_ctx.cols = term_cols;
-                effects_ctx.rows = term_rows;
-#ifdef _WIN32
-                pty_resize_win32(pty_ctx.hpc, term_cols, term_rows);
-#else
-                struct winsize new_ws = {
-                    .ws_row = term_rows,
-                    .ws_col = term_cols,
-                    .ws_xpixel = (unsigned short)(term_cols * cell_width),
-                    .ws_ypixel = (unsigned short)(term_rows * cell_height),
-                };
-                ioctl(pty_fd, TIOCSWINSZ, &new_ws);
-#endif
+                layout_terms(w, h, cell_width, cell_height, pad, &term_cols,
+                             &term_rows, &grid_origin_x, &grid_origin_y);
+                for (size_t i = 0; i < n_tabs; i++)
+                    tab_resize_pty(tab_list[i], term_cols, term_rows, cell_width,
+                                   cell_height);
                 prev_width = w;
                 prev_height = h;
             }
@@ -251,9 +229,10 @@ int main(int argc, char *argv[])
 
         bool focused = IsWindowFocused();
         if (focused != prev_focused) {
+            Tab *cur = tab_list[active];
             bool focus_mode = false;
-            if (!child_exited &&
-                ghostty_terminal_mode_get(terminal, GHOSTTY_MODE_FOCUS_EVENT,
+            if (!cur->child_exited &&
+                ghostty_terminal_mode_get(cur->terminal, GHOSTTY_MODE_FOCUS_EVENT,
                                           &focus_mode) == GHOSTTY_SUCCESS &&
                 focus_mode) {
                 GhosttyFocusEvent focus_event =
@@ -263,56 +242,98 @@ int main(int argc, char *argv[])
                 GhosttyResult focus_res = ghostty_focus_encode(
                     focus_event, focus_buf, sizeof(focus_buf), &focus_written);
                 if (focus_res == GHOSTTY_SUCCESS && focus_written > 0)
-                    pty_write(pty_wr, focus_buf, focus_written);
+                    pty_write(tab_pty_write(cur), focus_buf, focus_written);
             }
             prev_focused = focused;
         }
 
-        if (!child_exited) {
-#ifdef _WIN32
-            PtyReadResult pty_rc = pty_buf_drain(&pty_rb, terminal);
-#else
-            PtyReadResult pty_rc = pty_read_unix(pty_fd, terminal);
-#endif
-            if (pty_rc != PTY_READ_OK)
-                child_exited = true;
+        for (size_t i = 0; i < n_tabs; i++) {
+            if (tab_list[i]->child_exited)
+                continue;
+            PtyReadResult pr = tab_drain(tab_list[i]);
+            if (pr != PTY_READ_OK)
+                tab_list[i]->child_exited = true;
         }
 
-        if (child_exited && !child_reaped) {
+        for (size_t i = 0; i < n_tabs; i++) {
+            Tab *t = tab_list[i];
+            if (!t->child_exited || t->child_reaped)
+                continue;
 #ifdef _WIN32
-            DWORD wstatus = WaitForSingleObject(pty_ctx.process, 0);
+            DWORD wstatus = WaitForSingleObject(t->pty_ctx.process, 0);
             if (wstatus == WAIT_OBJECT_0) {
-                child_reaped = true;
+                t->child_reaped = true;
                 DWORD code = 0;
-                if (GetExitCodeProcess(pty_ctx.process, &code))
-                    child_exit_status = (int)code;
+                if (GetExitCodeProcess(t->pty_ctx.process, &code))
+                    t->child_exit_status = (int)code;
             } else if (wstatus == WAIT_FAILED) {
-                child_reaped = true;
+                t->child_reaped = true;
             }
 #else
             int wstatus = 0;
-            pid_t wp = waitpid(child, &wstatus, WNOHANG);
+            pid_t wp = waitpid(t->child, &wstatus, WNOHANG);
             if (wp > 0) {
-                child_reaped = true;
+                t->child_reaped = true;
                 if (WIFEXITED(wstatus))
-                    child_exit_status = WEXITSTATUS(wstatus);
+                    t->child_exit_status = WEXITSTATUS(wstatus);
                 else if (WIFSIGNALED(wstatus))
-                    child_exit_status = 128 + WTERMSIG(wstatus);
+                    t->child_exit_status = 128 + WTERMSIG(wstatus);
             }
 #endif
         }
 
-        bool scrollbar_consumed =
-            handle_scrollbar(terminal, render_state, &scrollbar_dragging);
+        Tab *cur = tab_list[active];
 
-        if (!child_exited) {
-            handle_input(pty_wr, key_encoder, key_event, terminal);
-            if (!scrollbar_consumed)
-                handle_mouse(pty_wr, mouse_encoder, mouse_event, terminal,
-                             cell_width, cell_height, pad);
+        Vector2 mpos = GetMousePosition();
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+            mpos.x < (float)TAB_STRIP_W) {
+            size_t idx = 0;
+            TabStripAction act = TAB_STRIP_NONE;
+            if (tab_strip_hit(mpos, scr_h, n_tabs, &idx, &act)) {
+                if (act == TAB_STRIP_NEW && n_tabs < MAX_TABS) {
+                    layout_terms(scr_w, scr_h, cell_width, cell_height, pad,
+                                 &term_cols, &term_rows, &grid_origin_x,
+                                 &grid_origin_y);
+                    for (size_t i = 0; i < n_tabs; i++)
+                        tab_resize_pty(tab_list[i], term_cols, term_rows,
+                                       cell_width, cell_height);
+                    Tab *nt = malloc(sizeof(Tab));
+                    if (nt && tab_start_shell(nt, term_cols, term_rows,
+                                              cell_width, cell_height,
+                                              shell_override)) {
+                        tab_list[n_tabs] = nt;
+                        active = n_tabs;
+                        n_tabs++;
+                        scrollbar_dragging = false;
+                    } else if (nt) {
+                        free(nt);
+                    }
+                } else if (act == TAB_STRIP_SELECT) {
+                    active = idx;
+                    scrollbar_dragging = false;
+                } else if (act == TAB_STRIP_CLOSE && n_tabs > 1) {
+                    close_tab_at(tab_list, &n_tabs, &active, idx);
+                    scrollbar_dragging = false;
+                }
+            }
         }
 
-        ghostty_render_state_update(render_state, terminal);
+        cur = tab_list[active];
+
+        bool scrollbar_consumed = handle_scrollbar(
+            cur->terminal, render_state, &scrollbar_dragging, grid_origin_x,
+            grid_origin_y, term_rows, cell_height, pad);
+
+        if (!cur->child_exited) {
+            handle_input(tab_pty_write(cur), key_encoder, key_event,
+                         cur->terminal);
+            if (!scrollbar_consumed && mpos.x >= (float)TAB_STRIP_W)
+                handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
+                             cur->terminal, cell_width, cell_height,
+                             grid_origin_x, pad, pad, pad);
+        }
+
+        ghostty_render_state_update(render_state, cur->terminal);
 
         GhosttyRenderStateColors bg_colors =
             GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
@@ -322,20 +343,30 @@ int main(int argc, char *argv[])
 
         GhosttyTerminalScrollbar scrollbar = {0};
         GhosttyTerminalScrollbar *scrollbar_ptr = NULL;
-        if (ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR,
+        if (ghostty_terminal_get(cur->terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR,
                                  &scrollbar) == GHOSTTY_SUCCESS)
             scrollbar_ptr = &scrollbar;
 
+        Color strip_bg = {45, 45, 48, 255};
+        Color tab_bg = {55, 55, 58, 255};
+        Color tab_active = {70, 100, 140, 255};
+        Color border = {80, 80, 85, 255};
+        Color tab_fg = {220, 220, 220, 255};
+
         BeginDrawing();
         ClearBackground(win_bg);
-        render_terminal(render_state, row_iter, row_cells, mono_font,
-                        cell_width, cell_height, font_size, scrollbar_ptr);
+        render_terminal(render_state, row_iter, row_cells, mono_font, cell_width,
+                        cell_height, font_size, scrollbar_ptr, grid_origin_x,
+                        grid_origin_y, term_rows, pad);
+        tab_strip_draw(mono_font, (float)font_size_px, scr_h, n_tabs, active,
+                       strip_bg, tab_bg, tab_active, border, tab_fg);
 
-        if (child_exited) {
+        if (cur->child_exited) {
             char exit_msg[128];
-            if (child_exit_status >= 0)
+            if (cur->child_exit_status >= 0)
                 snprintf(exit_msg, sizeof(exit_msg),
-                         "[process exited with status %d]", child_exit_status);
+                         "[process exited with status %d]",
+                         cur->child_exit_status);
             else
                 snprintf(exit_msg, sizeof(exit_msg), "[process exited]");
 
@@ -358,30 +389,12 @@ int main(int argc, char *argv[])
 cleanup:
     UnloadFont(mono_font);
     CloseWindow();
-#ifdef _WIN32
-    if (pty_ctx.hpc != INVALID_HANDLE_VALUE) {
-        ClosePseudoConsole(pty_ctx.hpc);
-        pty_ctx.hpc = INVALID_HANDLE_VALUE;
+
+    for (size_t i = 0; i < n_tabs; i++) {
+        tab_free(tab_list[i]);
+        free(tab_list[i]);
     }
-    if (pty_reader) {
-        if (WaitForSingleObject(pty_reader, 3000) != WAIT_OBJECT_0) {
-            fprintf(stderr,
-                    "pty reader thread did not exit in time, terminating\n");
-            TerminateThread(pty_reader, 1);
-        }
-        CloseHandle(pty_reader);
-    }
-    pty_cleanup_win(&pty_ctx);
-    DeleteCriticalSection(&pty_rb.cs);
-#else
-    if (pty_fd >= 0)
-        close(pty_fd);
-    if (child > 0 && !child_reaped) {
-        if (!child_exited)
-            kill(child, SIGHUP);
-        waitpid(child, NULL, 0);
-    }
-#endif
+
     if (mouse_event)
         ghostty_mouse_event_free(mouse_event);
     if (mouse_encoder)
@@ -396,7 +409,5 @@ cleanup:
         ghostty_render_state_row_iterator_free(row_iter);
     if (render_state)
         ghostty_render_state_free(render_state);
-    if (terminal)
-        ghostty_terminal_free(terminal);
     return exit_code;
 }
