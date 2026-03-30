@@ -10,6 +10,17 @@
 #include <unistd.h>
 #endif
 
+/** Fake bold for tab index digits without a separate bold font face. */
+static void draw_text_synthetic_bold(Font font, const char *text, Vector2 pos,
+                                     float font_size, Color fg)
+{
+    DrawTextEx(font, text, (Vector2){pos.x + 1.0f, pos.y}, font_size, 0, fg);
+    DrawTextEx(font, text, (Vector2){pos.x, pos.y + 1.0f}, font_size, 0, fg);
+    DrawTextEx(font, text, (Vector2){pos.x + 1.0f, pos.y + 1.0f}, font_size, 0,
+               fg);
+    DrawTextEx(font, text, pos, font_size, 0, fg);
+}
+
 static void truncate_to_width(Font font, float font_size, const char *src,
                               float max_w, char *out, size_t outsz)
 {
@@ -236,10 +247,52 @@ bool tab_splitter_hit(Vector2 mpos, int strip_w, int scr_h)
            mpos.x <= (float)(strip_w + TAB_SPLITTER_GRAB);
 }
 
+/** Shared geometry for the collapse/expand affordance (splitter, vertical center). */
+static void tab_splitter_toggle_bounds(int effective_strip_w, int scr_h, int *tx,
+                                     int *ty, int *tw, int *th)
+{
+    *tw = 20;
+    *th = 26;
+    *tx = effective_strip_w - *tw / 2;
+    *ty = scr_h / 2 - *th / 2;
+}
+
+/** Collapsed: small rect near left edge, vertically centered (matches tab_splitter_toggle_draw). */
+static void tab_collapsed_expand_bounds(int scr_h, int *tx, int *ty, int *tw, int *th)
+{
+    *tw = 20;
+    *th = 26;
+    *tx = (TAB_COLLAPSED_EDGE_HOVER - *tw) / 2;
+    if (*tx < 0)
+        *tx = 0;
+    *ty = scr_h / 2 - *th / 2;
+}
+
+bool tab_splitter_toggle_hit(Vector2 mpos, int effective_strip_w, int scr_h)
+{
+    /* Collapsed: only the chevron rect — rest of left margin is for terminal / selection. */
+    if (effective_strip_w == 0) {
+        int tx, ty, tw, th;
+        tab_collapsed_expand_bounds(scr_h, &tx, &ty, &tw, &th);
+        return mpos.x >= (float)tx && mpos.x < (float)(tx + tw) &&
+               mpos.y >= (float)ty && mpos.y < (float)(ty + th);
+    }
+    /* Expanded: only the chevron rect (center height). Rest of splitter = drag. */
+    int tx, ty, tw, th;
+    tab_splitter_toggle_bounds(effective_strip_w, scr_h, &tx, &ty, &tw, &th);
+    return mpos.x >= (float)tx && mpos.x < (float)(tx + tw) &&
+           mpos.y >= (float)ty && mpos.y < (float)(ty + th);
+}
+
 bool tab_strip_hit(Vector2 mpos, int strip_w, int scr_h, size_t n_tabs,
                    size_t *idx, TabStripAction *act, int tab_title_h,
-                   int tab_reserved_h)
+                   int tab_reserved_h, bool strip_collapsed)
 {
+    if (strip_collapsed)
+        return false;
+    /* Collapse control: do not treat as tab row / new tab. */
+    if (tab_splitter_toggle_hit(mpos, strip_w, scr_h))
+        return false;
     if (tab_title_h < 1)
         tab_title_h = 1;
     if (tab_reserved_h < 0)
@@ -288,8 +341,11 @@ void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
                     size_t edit_idx, const char *edit_buf, Color strip_bg,
                     Color tab_index_bg, Color tab_reserved_bg, Color tab_bg,
                     Color tab_active, Color border, Color fg, Color edit_bg,
-                    int tab_title_h, int tab_reserved_h)
+                    int tab_title_h, int tab_reserved_h, bool strip_collapsed)
 {
+    if (strip_collapsed)
+        return;
+
     if (tab_title_h < 1)
         tab_title_h = 1;
     if (tab_reserved_h < 0)
@@ -342,7 +398,10 @@ void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
         if (nx < 2.0f)
             nx = 2.0f;
         float ny = (float)y0 + ((float)row_h - ns.y) * 0.5f;
-        DrawTextEx(font, num, (Vector2){nx, ny}, font_size, 0, fg);
+        if (i == active_idx)
+            draw_text_synthetic_bold(font, num, (Vector2){nx, ny}, font_size, fg);
+        else
+            DrawTextEx(font, num, (Vector2){nx, ny}, font_size, 0, fg);
 
         char line[512];
         if (editing && edit_buf)
@@ -370,8 +429,31 @@ void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
     DrawRectangle(0, new_y0, strip_w - 1, 1, border);
     const char *plus = "+";
     Vector2 ps = MeasureTextEx(font, plus, font_size, 0);
-    DrawTextEx(font, plus,
-               (Vector2){((float)strip_w - ps.x) * 0.5f,
-                         (float)new_y0 + ((float)TAB_NEW_H - ps.y) * 0.5f},
+    draw_text_synthetic_bold(font, plus, (Vector2){((float)strip_w - ps.x) * 0.5f, (float)new_y0 + ((float)TAB_NEW_H - ps.y) * 0.5f}, font_size, fg);
+}
+
+void tab_splitter_toggle_draw(Font font, float font_size, int strip_w, int scr_h,
+                              bool strip_collapsed, bool show, Color fg)
+{
+    if (!show)
+        return;
+    if (strip_collapsed) {
+        int tx, ty, tw, th;
+        tab_collapsed_expand_bounds(scr_h, &tx, &ty, &tw, &th);
+        const char *ch = ">";
+        Vector2 cs = MeasureTextEx(font, ch, font_size, 0);
+        DrawTextEx(font, ch,
+                   (Vector2){(float)tx + ((float)tw - cs.x) * 0.5f,
+                             (float)ty + ((float)th - cs.y) * 0.5f},
+                   font_size, 0, fg);
+        return;
+    }
+    int tx, ty, tw, th;
+    tab_splitter_toggle_bounds(strip_w, scr_h, &tx, &ty, &tw, &th);
+    const char *lt = "<";
+    Vector2 ls = MeasureTextEx(font, lt, font_size, 0);
+    DrawTextEx(font, lt,
+               (Vector2){(float)tx + ((float)tw - ls.x) * 0.5f,
+                         (float)ty + ((float)th - ls.y) * 0.5f},
                font_size, 0, fg);
 }

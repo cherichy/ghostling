@@ -534,11 +534,12 @@ void render_terminal(GhosttyRenderState render_state,
 
             int italic_offset = style.italic ? (font_size / 6) : 0;
 
-            DrawTextEx(font, text, (Vector2){x + italic_offset, y},
+            DrawTextEx(font, text, (Vector2){(float)(x + italic_offset), (float)y},
                        (float)font_size, 0, ray_fg);
 
             if (style.bold) {
-                DrawTextEx(font, text, (Vector2){x + italic_offset + 1, y},
+                DrawTextEx(font, text,
+                           (Vector2){(float)(x + italic_offset + 1), (float)y},
                            (float)font_size, 0, ray_fg);
             }
 

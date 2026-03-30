@@ -20,6 +20,9 @@
 #define MAX_TABS 16
 #define TAB_STRIP_W_DEFAULT 156
 #define TAB_STRIP_W_MIN 96
+/** Collapsed: max horizontal extent used to center the expand chevron near the
+ *  left edge (hit box is a small rect inside this, not the full band). */
+#define TAB_COLLAPSED_EDGE_HOVER 20
 #define TAB_SPLITTER_GRAB 8
 #define TAB_NEW_H 44
 #define TAB_CLOSE_W 28
@@ -75,15 +78,22 @@ void tab_display_title(const Tab *t, size_t tab_index_one_based, char *out,
 
 bool tab_splitter_hit(Vector2 mpos, int strip_w, int scr_h);
 
+/** Hit test for the collapse/expand control on the splitter (center height). */
+bool tab_splitter_toggle_hit(Vector2 mpos, int effective_strip_w, int scr_h);
+
 bool tab_strip_hit(Vector2 mpos, int strip_w, int scr_h, size_t n_tabs,
                    size_t *idx, TabStripAction *act, int tab_title_h,
-                   int tab_reserved_h);
+                   int tab_reserved_h, bool strip_collapsed);
 
 void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
                     Tab *const *tabs, size_t n_tabs, size_t active_idx,
                     size_t edit_idx, const char *edit_buf, Color strip_bg,
                     Color tab_index_bg, Color tab_reserved_bg, Color tab_bg,
                     Color tab_active, Color border, Color fg, Color edit_bg,
-                    int tab_title_h, int tab_reserved_h);
+                    int tab_title_h, int tab_reserved_h, bool strip_collapsed);
+
+/** Draw `<` / `>` on top of splitter highlight etc.; call after tab strip + splitter line. */
+void tab_splitter_toggle_draw(Font font, float font_size, int strip_w, int scr_h,
+                              bool strip_collapsed, bool show, Color fg);
 
 #endif

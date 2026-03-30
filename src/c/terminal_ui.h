@@ -15,6 +15,8 @@ void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
 bool handle_scrollbar(GhosttyTerminal terminal, GhosttyRenderState render_state,
                       bool *dragging, int grid_origin_x, int grid_origin_y,
                       uint16_t term_rows, int cell_height, int pad_right);
+/** @param font_size Logical point size for DrawTextEx (matches config); atlas is
+ *  loaded larger on HiDPI — must stay logical here or cells and glyphs misalign. */
 void render_terminal(GhosttyRenderState render_state,
                      GhosttyRenderStateRowIterator row_iter,
                      GhosttyRenderStateRowCells cells, Font font,
