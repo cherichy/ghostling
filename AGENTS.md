@@ -24,6 +24,18 @@
 - **libghostty-vt** is dynamic; `zig build` installs `ghostling` and the shared library under `zig-out/` (same layout idea as CMake). Run: `zig build run`.
 - Step `ghostling-c` is an alias for the default install (historical name).
 
+## Config file (optional)
+
+Plain `key=value` lines, `#` comments. Loaded from `%APPDATA%\ghostling\config` on Windows or `~/.config/ghostling/config` on Unix (see `config_font.c`).
+
+| Key | Meaning |
+|-----|---------|
+| `font_path` | TTF path (default: bundled Maple Mono path) |
+| `font_size` | PTY grid size in points (default 16) |
+| `tab_title_font_scale` | Tab title / `×` / `+` vs grid font: `font_size_px * this` (default `0.8`, range about 0.2–2) |
+| `tab_title_h` | Pixel height of the **top** band (title + close), default `18` |
+| `tab_reserved_h` | Pixel height of the **bottom** reserved band per tab, default `24` |
+
 ## Code Conventions
 
 - C (not C++). Entry point is `src/c/main.c`; PTY, config/font, effects, and terminal UI live under `src/c/`.

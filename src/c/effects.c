@@ -1,5 +1,4 @@
 #include "effects.h"
-#include "raylib.h"
 #include <string.h>
 
 void effect_write_pty(GhosttyTerminal terminal, void *userdata,
@@ -52,17 +51,17 @@ GhosttyString effect_xtversion(GhosttyTerminal terminal, void *userdata)
 
 void effect_title_changed(GhosttyTerminal terminal, void *userdata)
 {
-    (void)userdata;
+    EffectsContext *ctx = (EffectsContext *)userdata;
     GhosttyString title = {0};
     if (ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_TITLE, &title) !=
         GHOSTTY_SUCCESS)
         return;
 
-    char buf[256];
-    size_t len = title.len < sizeof(buf) - 1 ? title.len : sizeof(buf) - 1;
-    memcpy(buf, title.ptr, len);
-    buf[len] = '\0';
-    SetWindowTitle(buf);
+    size_t len = title.len < sizeof(ctx->title_shell) - 1
+                     ? title.len
+                     : sizeof(ctx->title_shell) - 1;
+    memcpy(ctx->title_shell, title.ptr, len);
+    ctx->title_shell[len] = '\0';
 }
 
 bool effect_color_scheme(GhosttyTerminal terminal, void *userdata,

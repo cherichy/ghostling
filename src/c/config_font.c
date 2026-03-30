@@ -78,6 +78,21 @@ static void config_load_file(const char *path, AppConfig *cfg)
             long n = strtol(val, &end, 10);
             if (end != val && n >= 6 && n <= 256)
                 cfg->font_size = (int)n;
+        } else if (strcmp(key, "tab_title_font_scale") == 0) {
+            char *end = NULL;
+            float f = strtof(val, &end);
+            if (end != val && f >= 0.2f && f <= 2.0f)
+                cfg->tab_title_font_scale = f;
+        } else if (strcmp(key, "tab_title_h") == 0) {
+            char *end = NULL;
+            long n = strtol(val, &end, 10);
+            if (end != val && n >= 8 && n <= 128)
+                cfg->tab_title_h = (int)n;
+        } else if (strcmp(key, "tab_reserved_h") == 0) {
+            char *end = NULL;
+            long n = strtol(val, &end, 10);
+            if (end != val && n >= 8 && n <= 128)
+                cfg->tab_reserved_h = (int)n;
         }
     }
     fclose(f);
@@ -88,6 +103,9 @@ void config_load(AppConfig *cfg)
     cfg->font_path[0] = '\0';
     cfg->font_size = 16;
     cfg->font_path_from_config = false;
+    cfg->tab_title_font_scale = 0.8f;
+    cfg->tab_title_h = 18;
+    cfg->tab_reserved_h = 24;
 
     char path[4096];
     if (config_default_path(path, sizeof(path)))

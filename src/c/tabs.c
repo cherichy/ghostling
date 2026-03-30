@@ -10,6 +10,32 @@
 #include <unistd.h>
 #endif
 
+static void truncate_to_width(Font font, float font_size, const char *src,
+                              float max_w, char *out, size_t outsz)
+{
+    if (max_w < 8.0f) {
+        out[0] = '\0';
+        return;
+    }
+    if (MeasureTextEx(font, src, font_size, 0).x <= max_w) {
+        snprintf(out, outsz, "%s", src);
+        return;
+    }
+    char tmp[512];
+    snprintf(tmp, sizeof(tmp), "%s", src);
+    size_t n = strlen(tmp);
+    while (n > 0) {
+        tmp[n - 1] = '\0';
+        n--;
+        if (MeasureTextEx(font, tmp, font_size, 0).x <= max_w) {
+            snprintf(out, outsz, "%s", tmp);
+            return;
+        }
+    }
+    if (outsz > 0)
+        out[0] = '\0';
+}
+
 void tab_init_struct(Tab *t)
 {
     memset(t, 0, sizeof(*t));
@@ -87,6 +113,23 @@ void tab_bind_ghostty_callbacks(Tab *t)
                          (const void *)effect_color_scheme);
 }
 
+void tab_display_title(const Tab *t, size_t tab_index_one_based, char *out,
+                       size_t outsz)
+{
+    const EffectsContext *e = &t->effects;
+    if (e->title_override[0] != '\0') {
+        snprintf(out, outsz, "%s", e->title_override);
+        return;
+    }
+    if (e->title_shell[0] != '\0') {
+        snprintf(out, outsz, "%s", e->title_shell);
+        return;
+    }
+    (void)tab_index_one_based;
+    if (outsz > 0)
+        out[0] = '\0';
+}
+
 bool tab_start_shell(Tab *t, uint16_t cols, uint16_t rows, int cell_width,
                      int cell_height, const char *shell_override)
 {
@@ -130,6 +173,8 @@ bool tab_start_shell(Tab *t, uint16_t cols, uint16_t rows, int cell_width,
     t->effects.cell_height = cell_height;
     t->effects.cols = cols;
     t->effects.rows = rows;
+    t->effects.title_shell[0] = '\0';
+    t->effects.title_override[0] = '\0';
 
     tab_bind_ghostty_callbacks(t);
 
@@ -184,11 +229,27 @@ PtyHandle tab_pty_write(Tab *t)
 #endif
 }
 
-bool tab_strip_hit(Vector2 mpos, int scr_h, size_t n_tabs, size_t *idx,
-                   TabStripAction *act)
+bool tab_splitter_hit(Vector2 mpos, int strip_w, int scr_h)
 {
+    (void)scr_h;
+    return mpos.x >= (float)strip_w &&
+           mpos.x <= (float)(strip_w + TAB_SPLITTER_GRAB);
+}
+
+bool tab_strip_hit(Vector2 mpos, int strip_w, int scr_h, size_t n_tabs,
+                   size_t *idx, TabStripAction *act, int tab_title_h,
+                   int tab_reserved_h)
+{
+    if (tab_title_h < 1)
+        tab_title_h = 1;
+    if (tab_reserved_h < 0)
+        tab_reserved_h = 0;
+    int row_h = tab_title_h + tab_reserved_h;
+    if (row_h < 1)
+        row_h = 1;
+
     *act = TAB_STRIP_NONE;
-    if (mpos.x < 0.0f || mpos.x >= (float)TAB_STRIP_W)
+    if (mpos.x < 0.0f || mpos.x >= (float)strip_w)
         return false;
 
     int new_y0 = scr_h - TAB_NEW_H;
@@ -197,13 +258,13 @@ bool tab_strip_hit(Vector2 mpos, int scr_h, size_t n_tabs, size_t *idx,
         return true;
     }
 
-    int row = (int)(mpos.y / (float)TAB_ROW_H);
+    int row = (int)(mpos.y / (float)row_h);
     if (row < 0) {
         *act = TAB_STRIP_NONE;
         return true;
     }
 
-    size_t max_vis = (size_t)((new_y0 > 0) ? (new_y0 / TAB_ROW_H) : 1);
+    size_t max_vis = (size_t)((new_y0 > 0) ? (new_y0 / row_h) : 1);
     if (max_vis == 0)
         max_vis = 1;
 
@@ -213,51 +274,104 @@ bool tab_strip_hit(Vector2 mpos, int scr_h, size_t n_tabs, size_t *idx,
     }
 
     *idx = (size_t)row;
-    if (mpos.x >= (float)(TAB_STRIP_W - TAB_CLOSE_W))
+    int y_in_tab = (int)mpos.y - row * row_h;
+    bool in_title = y_in_tab < tab_title_h;
+    if (mpos.x >= (float)(strip_w - TAB_CLOSE_W) && in_title)
         *act = TAB_STRIP_CLOSE;
     else
         *act = TAB_STRIP_SELECT;
     return true;
 }
 
-void tab_strip_draw(Font font, float font_size, int scr_h, size_t n_tabs,
-                    size_t active_idx, Color strip_bg, Color tab_bg,
-                    Color tab_active, Color border, Color fg)
+void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
+                    Tab *const *tabs, size_t n_tabs, size_t active_idx,
+                    size_t edit_idx, const char *edit_buf, Color strip_bg,
+                    Color tab_index_bg, Color tab_reserved_bg, Color tab_bg,
+                    Color tab_active, Color border, Color fg, Color edit_bg,
+                    int tab_title_h, int tab_reserved_h)
 {
-    DrawRectangle(0, 0, TAB_STRIP_W, scr_h, strip_bg);
-    DrawRectangle(TAB_STRIP_W - 1, 0, 1, scr_h, border);
+    if (tab_title_h < 1)
+        tab_title_h = 1;
+    if (tab_reserved_h < 0)
+        tab_reserved_h = 0;
+    int row_h = tab_title_h + tab_reserved_h;
+    if (row_h < 1)
+        row_h = 1;
+
+    int ix = TAB_INDEX_COL_W;
+    if (ix >= strip_w - (int)TAB_CLOSE_W - 8)
+        ix = (strip_w > 40) ? 20 : 0;
+
+    DrawRectangle(0, 0, strip_w, scr_h, strip_bg);
+    DrawRectangle(strip_w - 1, 0, 1, scr_h, border);
 
     int new_y0 = scr_h - TAB_NEW_H;
-    size_t max_vis = (size_t)((new_y0 > 0) ? (new_y0 / TAB_ROW_H) : 1);
+    size_t max_vis = (size_t)((new_y0 > 0) ? (new_y0 / row_h) : 1);
     if (max_vis == 0)
         max_vis = 1;
 
-    for (size_t i = 0; i < n_tabs && i < max_vis; i++) {
-        int y0 = (int)(i * TAB_ROW_H);
-        Color bg = (i == active_idx) ? tab_active : tab_bg;
-        DrawRectangle(0, y0, TAB_STRIP_W - 1, TAB_ROW_H, bg);
-        DrawRectangle(0, y0 + TAB_ROW_H - 1, TAB_STRIP_W - 1, 1, border);
+    float label_max_w = (float)(strip_w - ix - TAB_CLOSE_W - 10);
+    if (label_max_w < 20.0f)
+        label_max_w = 20.0f;
 
-        char label[32];
-        snprintf(label, sizeof(label), " %zu ", i + 1);
-        Vector2 ts = MeasureTextEx(font, label, font_size, 0);
-        float tx = 6.0f;
-        float ty = (float)y0 + ((float)TAB_ROW_H - ts.y) * 0.5f;
-        DrawTextEx(font, label, (Vector2){tx, ty}, font_size, 0, fg);
+    for (size_t i = 0; i < n_tabs && i < max_vis; i++) {
+        int y0 = (int)(i * row_h);
+        bool editing = (edit_idx == i);
+
+        DrawRectangle(0, y0, ix, row_h, tab_index_bg);
+        DrawRectangle(ix - 1, y0, 1, row_h, border);
+
+        Color title_bg = editing ? edit_bg
+                               : ((i == active_idx) ? tab_active : tab_bg);
+        DrawRectangle(ix, y0, strip_w - ix - 1, tab_title_h, title_bg);
+
+        int y_res = y0 + tab_title_h;
+        DrawRectangle(ix, y_res, strip_w - ix - 1, tab_reserved_h,
+                      tab_reserved_bg);
+
+        /* Title / reserved: only to the right of the index column — a full-width
+         * line here would cut through the vertically centered index digit. */
+        DrawRectangle(ix, y0 + tab_title_h - 1, strip_w - ix - 1, 1, border);
+        /* Between two tab rows: full width so the index cells are separated too. */
+        DrawRectangle(0, y_res + tab_reserved_h - 1, strip_w - 1, 1, border);
+
+        char num[8];
+        snprintf(num, sizeof(num), "%zu", i + 1);
+        Vector2 ns = MeasureTextEx(font, num, font_size, 0);
+        float nx = ((float)ix - ns.x) * 0.5f;
+        if (nx < 2.0f)
+            nx = 2.0f;
+        float ny = (float)y0 + ((float)row_h - ns.y) * 0.5f;
+        DrawTextEx(font, num, (Vector2){nx, ny}, font_size, 0, fg);
+
+        char line[512];
+        if (editing && edit_buf)
+            snprintf(line, sizeof(line), "%s", edit_buf);
+        else {
+            char raw[256];
+            tab_display_title(tabs[i], i + 1, raw, sizeof(raw));
+            truncate_to_width(font, font_size, raw, label_max_w, line,
+                              sizeof(line));
+        }
+
+        Vector2 ts = MeasureTextEx(font, line, font_size, 0);
+        float tx = (float)ix + 6.0f;
+        float ty = (float)y0 + ((float)tab_title_h - ts.y) * 0.5f;
+        DrawTextEx(font, line, (Vector2){tx, ty}, font_size, 0, fg);
 
         const char *x = "×";
         Vector2 xs = MeasureTextEx(font, x, font_size, 0);
-        float cx = (float)(TAB_STRIP_W - TAB_CLOSE_W) +
+        float cx = (float)(strip_w - TAB_CLOSE_W) +
                    (((float)TAB_CLOSE_W - xs.x) * 0.5f);
         DrawTextEx(font, x, (Vector2){cx, ty}, font_size, 0, fg);
     }
 
-    DrawRectangle(0, new_y0, TAB_STRIP_W - 1, TAB_NEW_H, tab_bg);
-    DrawRectangle(0, new_y0, TAB_STRIP_W - 1, 1, border);
+    DrawRectangle(0, new_y0, strip_w - 1, TAB_NEW_H, tab_bg);
+    DrawRectangle(0, new_y0, strip_w - 1, 1, border);
     const char *plus = "+";
     Vector2 ps = MeasureTextEx(font, plus, font_size, 0);
     DrawTextEx(font, plus,
-               (Vector2){((float)TAB_STRIP_W - ps.x) * 0.5f,
+               (Vector2){((float)strip_w - ps.x) * 0.5f,
                          (float)new_y0 + ((float)TAB_NEW_H - ps.y) * 0.5f},
                font_size, 0, fg);
 }

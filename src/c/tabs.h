@@ -18,10 +18,15 @@
 #endif
 
 #define MAX_TABS 16
-#define TAB_STRIP_W 156
-#define TAB_ROW_H 36
+#define TAB_STRIP_W_DEFAULT 156
+#define TAB_STRIP_W_MIN 96
+#define TAB_SPLITTER_GRAB 8
 #define TAB_NEW_H 44
 #define TAB_CLOSE_W 28
+/** Left gutter for 1..N index; spans full tab row height (title + reserved). */
+#define TAB_INDEX_COL_W 28
+/** Pass as @p edit_idx when no tab is being renamed. */
+#define TAB_EDIT_NONE ((size_t)-1)
 
 typedef struct Tab {
     bool in_use;
@@ -65,11 +70,20 @@ PtyReadResult tab_drain(Tab *t);
 
 PtyHandle tab_pty_write(Tab *t);
 
-bool tab_strip_hit(Vector2 mpos, int scr_h, size_t n_tabs, size_t *idx,
-                   TabStripAction *act);
+void tab_display_title(const Tab *t, size_t tab_index_one_based, char *out,
+                       size_t outsz);
 
-void tab_strip_draw(Font font, float font_size, int scr_h, size_t n_tabs,
-                    size_t active_idx, Color strip_bg, Color tab_bg,
-                    Color tab_active, Color border, Color fg);
+bool tab_splitter_hit(Vector2 mpos, int strip_w, int scr_h);
+
+bool tab_strip_hit(Vector2 mpos, int strip_w, int scr_h, size_t n_tabs,
+                   size_t *idx, TabStripAction *act, int tab_title_h,
+                   int tab_reserved_h);
+
+void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
+                    Tab *const *tabs, size_t n_tabs, size_t active_idx,
+                    size_t edit_idx, const char *edit_buf, Color strip_bg,
+                    Color tab_index_bg, Color tab_reserved_bg, Color tab_bg,
+                    Color tab_active, Color border, Color fg, Color edit_bg,
+                    int tab_title_h, int tab_reserved_h);
 
 #endif

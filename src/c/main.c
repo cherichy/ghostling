@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdint.h>
+
 /* raylib before Win32 headers: GDI/User declare names (Rectangle, CloseWindow,
  * ShowCursor) that collide with raylib's API if windows.h is included first. */
 #include "raylib.h"
@@ -32,11 +34,65 @@
 #include "tabs.h"
 #include "terminal_ui.h"
 
-static void layout_terms(int scr_w, int scr_h, int cell_width, int cell_height,
-                         int pad, uint16_t *term_cols, uint16_t *term_rows,
-                         int *grid_origin_x, int *grid_origin_y)
+static int utf8_encode(uint32_t cp, char out[4])
 {
-    *grid_origin_x = TAB_STRIP_W + pad;
+    const uint32_t MAX_UNICODE = 0x10FFFF;
+    const uint32_t REPLACEMENT_CHAR = 0xFFFD;
+
+    if (cp > MAX_UNICODE)
+        cp = REPLACEMENT_CHAR;
+
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+static void utf8_pop_back(char *s)
+{
+    size_t n = strlen(s);
+    if (n == 0)
+        return;
+    n--;
+    while (n > 0 && ((unsigned char)s[n] & 0xC0) == 0x80)
+        n--;
+    s[n] = '\0';
+}
+
+static void clamp_tab_strip_w(int scr_w, int cell_width, int pad, int *strip_w)
+{
+    int min_content_px = cell_width * 20;
+    int max_strip = scr_w - pad * 2 - min_content_px;
+    if (max_strip < TAB_STRIP_W_MIN)
+        max_strip = TAB_STRIP_W_MIN;
+    if (*strip_w < TAB_STRIP_W_MIN)
+        *strip_w = TAB_STRIP_W_MIN;
+    if (*strip_w > max_strip)
+        *strip_w = max_strip;
+}
+
+static void layout_terms(int scr_w, int scr_h, int tab_strip_w, int cell_width,
+                         int cell_height, int pad, uint16_t *term_cols,
+                         uint16_t *term_rows, int *grid_origin_x,
+                         int *grid_origin_y)
+{
+    *grid_origin_x = tab_strip_w + pad;
     *grid_origin_y = pad;
     int content_w = scr_w - *grid_origin_x - pad;
     int content_h = scr_h - 2 * pad;
@@ -68,6 +124,20 @@ static void close_tab_at(Tab **tabs, size_t *n_tabs, size_t *active, size_t idx)
     } else if (*active > idx) {
         (*active)--;
     }
+}
+
+static void apply_strip_resize(int scr_w, int scr_h, int *tab_strip_w,
+                               int cell_width, int cell_height, int pad,
+                               uint16_t *term_cols, uint16_t *term_rows,
+                               int *grid_origin_x, int *grid_origin_y,
+                               Tab **tab_list, size_t n_tabs)
+{
+    clamp_tab_strip_w(scr_w, cell_width, pad, tab_strip_w);
+    layout_terms(scr_w, scr_h, *tab_strip_w, cell_width, cell_height, pad,
+                 term_cols, term_rows, grid_origin_x, grid_origin_y);
+    for (size_t i = 0; i < n_tabs; i++)
+        tab_resize_pty(tab_list[i], *term_cols, *term_rows, cell_width,
+                       cell_height);
 }
 
 int main(int argc, char *argv[])
@@ -115,6 +185,8 @@ int main(int argc, char *argv[])
 
     const int pad = 4;
 
+    int tab_strip_w = TAB_STRIP_W_DEFAULT;
+
     Tab *tab_list[MAX_TABS];
     memset(tab_list, 0, sizeof(tab_list));
     size_t n_tabs = 0;
@@ -124,10 +196,11 @@ int main(int argc, char *argv[])
     int scr_h = GetScreenHeight();
     uint16_t term_cols = 1;
     uint16_t term_rows = 1;
-    int grid_origin_x = TAB_STRIP_W + pad;
+    int grid_origin_x = tab_strip_w + pad;
     int grid_origin_y = pad;
-    layout_terms(scr_w, scr_h, cell_width, cell_height, pad, &term_cols,
-                 &term_rows, &grid_origin_x, &grid_origin_y);
+    clamp_tab_strip_w(scr_w, cell_width, pad, &tab_strip_w);
+    layout_terms(scr_w, scr_h, tab_strip_w, cell_width, cell_height, pad,
+                 &term_cols, &term_rows, &grid_origin_x, &grid_origin_y);
 
     tab_list[0] = malloc(sizeof(Tab));
     if (!tab_list[0]) {
@@ -144,6 +217,13 @@ int main(int argc, char *argv[])
         return 1;
     }
     n_tabs = 1;
+
+    double last_tab_click_t = -100.0;
+    size_t last_tab_click_idx = TAB_EDIT_NONE;
+    size_t edit_tab = TAB_EDIT_NONE;
+    char edit_buf[256];
+
+    bool splitter_dragging = false;
 
     GhosttyKeyEncoder key_encoder = NULL;
     GhosttyKeyEvent key_event = NULL;
@@ -217,13 +297,30 @@ int main(int argc, char *argv[])
             int w = scr_w;
             int h = scr_h;
             if (w != prev_width || h != prev_height) {
-                layout_terms(w, h, cell_width, cell_height, pad, &term_cols,
-                             &term_rows, &grid_origin_x, &grid_origin_y);
+                clamp_tab_strip_w(w, cell_width, pad, &tab_strip_w);
+                layout_terms(w, h, tab_strip_w, cell_width, cell_height, pad,
+                             &term_cols, &term_rows, &grid_origin_x,
+                             &grid_origin_y);
                 for (size_t i = 0; i < n_tabs; i++)
                     tab_resize_pty(tab_list[i], term_cols, term_rows, cell_width,
                                    cell_height);
                 prev_width = w;
                 prev_height = h;
+            }
+        }
+
+        if (splitter_dragging) {
+            if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                int nx = (int)GetMousePosition().x;
+                if (nx != tab_strip_w) {
+                    tab_strip_w = nx;
+                    apply_strip_resize(scr_w, scr_h, &tab_strip_w, cell_width,
+                                       cell_height, pad, &term_cols,
+                                       &term_rows, &grid_origin_x,
+                                       &grid_origin_y, tab_list, n_tabs);
+                }
+            } else {
+                splitter_dragging = false;
             }
         }
 
@@ -285,18 +382,36 @@ int main(int argc, char *argv[])
         Tab *cur = tab_list[active];
 
         Vector2 mpos = GetMousePosition();
+
+        if (tab_splitter_hit(mpos, tab_strip_w, scr_h))
+            SetMouseCursor(MOUSE_CURSOR_RESIZE_EW);
+        else
+            SetMouseCursor(MOUSE_CURSOR_DEFAULT);
+
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-            mpos.x < (float)TAB_STRIP_W) {
+            tab_splitter_hit(mpos, tab_strip_w, scr_h)) {
+            splitter_dragging = true;
+            scrollbar_dragging = false;
+        }
+
+        if (edit_tab != TAB_EDIT_NONE &&
+            IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+            mpos.x >= (float)grid_origin_x) {
+            edit_tab = TAB_EDIT_NONE;
+        }
+
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+            mpos.x < (float)tab_strip_w && !splitter_dragging) {
             size_t idx = 0;
             TabStripAction act = TAB_STRIP_NONE;
-            if (tab_strip_hit(mpos, scr_h, n_tabs, &idx, &act)) {
+            if (tab_strip_hit(mpos, tab_strip_w, scr_h, n_tabs, &idx, &act,
+                               app_cfg.tab_title_h, app_cfg.tab_reserved_h)) {
                 if (act == TAB_STRIP_NEW && n_tabs < MAX_TABS) {
-                    layout_terms(scr_w, scr_h, cell_width, cell_height, pad,
-                                 &term_cols, &term_rows, &grid_origin_x,
-                                 &grid_origin_y);
-                    for (size_t i = 0; i < n_tabs; i++)
-                        tab_resize_pty(tab_list[i], term_cols, term_rows,
-                                       cell_width, cell_height);
+                    edit_tab = TAB_EDIT_NONE;
+                    apply_strip_resize(scr_w, scr_h, &tab_strip_w, cell_width,
+                                       cell_height, pad, &term_cols,
+                                       &term_rows, &grid_origin_x,
+                                       &grid_origin_y, tab_list, n_tabs);
                     Tab *nt = malloc(sizeof(Tab));
                     if (nt && tab_start_shell(nt, term_cols, term_rows,
                                               cell_width, cell_height,
@@ -308,11 +423,27 @@ int main(int argc, char *argv[])
                     } else if (nt) {
                         free(nt);
                     }
-                } else if (act == TAB_STRIP_SELECT) {
-                    active = idx;
-                    scrollbar_dragging = false;
                 } else if (act == TAB_STRIP_CLOSE && n_tabs > 1) {
+                    if (edit_tab == idx)
+                        edit_tab = TAB_EDIT_NONE;
+                    else if (edit_tab != TAB_EDIT_NONE && edit_tab > idx)
+                        edit_tab--;
                     close_tab_at(tab_list, &n_tabs, &active, idx);
+                    scrollbar_dragging = false;
+                } else if (act == TAB_STRIP_SELECT) {
+                    double now = GetTime();
+                    if (now - last_tab_click_t < 0.35 &&
+                        idx == last_tab_click_idx && idx == active) {
+                        edit_tab = idx;
+                        tab_display_title(tab_list[idx], idx + 1, edit_buf,
+                                          sizeof(edit_buf));
+                        last_tab_click_t = -100.0;
+                    } else {
+                        edit_tab = TAB_EDIT_NONE;
+                        active = idx;
+                        last_tab_click_t = now;
+                        last_tab_click_idx = idx;
+                    }
                     scrollbar_dragging = false;
                 }
             }
@@ -320,20 +451,53 @@ int main(int argc, char *argv[])
 
         cur = tab_list[active];
 
+        if (edit_tab != TAB_EDIT_NONE) {
+            if (IsKeyPressed(KEY_ESCAPE))
+                edit_tab = TAB_EDIT_NONE;
+            else if (IsKeyPressed(KEY_ENTER)) {
+                snprintf(tab_list[edit_tab]->effects.title_override,
+                         sizeof(tab_list[edit_tab]->effects.title_override),
+                         "%s", edit_buf);
+                edit_tab = TAB_EDIT_NONE;
+            } else {
+                if (IsKeyPressed(KEY_BACKSPACE) ||
+                    IsKeyPressedRepeat(KEY_BACKSPACE))
+                    utf8_pop_back(edit_buf);
+                int ch;
+                while ((ch = GetCharPressed()) != 0) {
+                    size_t len = strlen(edit_buf);
+                    if (len + 4 >= sizeof(edit_buf))
+                        break;
+                    char u8[4];
+                    int n = utf8_encode((uint32_t)ch, u8);
+                    if (len + (size_t)n < sizeof(edit_buf)) {
+                        memcpy(edit_buf + len, u8, (size_t)n);
+                        edit_buf[len + (size_t)n] = '\0';
+                    }
+                }
+            }
+        }
+
         bool scrollbar_consumed = handle_scrollbar(
             cur->terminal, render_state, &scrollbar_dragging, grid_origin_x,
             grid_origin_y, term_rows, cell_height, pad);
 
-        if (!cur->child_exited) {
+        if (!cur->child_exited && edit_tab == TAB_EDIT_NONE) {
             handle_input(tab_pty_write(cur), key_encoder, key_event,
                          cur->terminal);
-            if (!scrollbar_consumed && mpos.x >= (float)TAB_STRIP_W)
+            if (!scrollbar_consumed && mpos.x >= (float)tab_strip_w)
                 handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
                              cur->terminal, cell_width, cell_height,
                              grid_origin_x, pad, pad, pad);
         }
 
         ghostty_render_state_update(render_state, cur->terminal);
+
+        char wtitle[280];
+        char disp[256];
+        tab_display_title(cur, active + 1, disp, sizeof(disp));
+        snprintf(wtitle, sizeof(wtitle), "%s", disp[0] != '\0' ? disp : "ghostling");
+        SetWindowTitle(wtitle);
 
         GhosttyRenderStateColors bg_colors =
             GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
@@ -348,18 +512,33 @@ int main(int argc, char *argv[])
             scrollbar_ptr = &scrollbar;
 
         Color strip_bg = {45, 45, 48, 255};
+        Color tab_index_bg = {40, 40, 44, 255};
+        Color tab_reserved_bg = {38, 38, 42, 255};
         Color tab_bg = {55, 55, 58, 255};
         Color tab_active = {70, 100, 140, 255};
         Color border = {80, 80, 85, 255};
         Color tab_fg = {220, 220, 220, 255};
+        Color edit_bg = {50, 70, 95, 255};
 
         BeginDrawing();
         ClearBackground(win_bg);
         render_terminal(render_state, row_iter, row_cells, mono_font, cell_width,
                         cell_height, font_size, scrollbar_ptr, grid_origin_x,
                         grid_origin_y, term_rows, pad);
-        tab_strip_draw(mono_font, (float)font_size_px, scr_h, n_tabs, active,
-                       strip_bg, tab_bg, tab_active, border, tab_fg);
+        float tab_title_font_px =
+            (float)font_size_px * app_cfg.tab_title_font_scale;
+        if (tab_title_font_px < 6.0f)
+            tab_title_font_px = 6.0f;
+        tab_strip_draw(mono_font, tab_title_font_px, tab_strip_w, scr_h,
+                       tab_list, n_tabs, active, edit_tab, edit_buf, strip_bg,
+                       tab_index_bg, tab_reserved_bg, tab_bg, tab_active,
+                       border, tab_fg, edit_bg, app_cfg.tab_title_h,
+                       app_cfg.tab_reserved_h);
+
+        if (splitter_dragging || tab_splitter_hit(mpos, tab_strip_w, scr_h)) {
+            int sx = tab_strip_w - 1;
+            DrawRectangle(sx, 0, 2, scr_h, (Color){120, 160, 220, 255});
+        }
 
         if (cur->child_exited) {
             char exit_msg[128];

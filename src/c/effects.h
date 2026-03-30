@@ -13,6 +13,10 @@ typedef struct {
     int cell_height;
     uint16_t cols;
     uint16_t rows;
+    /** Set by OSC title sequences from the shell (ghostty callback). */
+    char title_shell[256];
+    /** If non-empty, shown in tab bar instead of @ref title_shell (user rename). */
+    char title_override[256];
 } EffectsContext;
 
 void effect_write_pty(GhosttyTerminal terminal, void *userdata,
