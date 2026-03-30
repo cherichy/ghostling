@@ -203,12 +203,27 @@ int main(int argc, char *argv[])
 
     int scr_w = GetScreenWidth();
     int scr_h = GetScreenHeight();
+    int render_w = GetRenderWidth();
+    int render_h = GetRenderHeight();
+    int ui_w = scr_w;
+    int ui_h = scr_h;
+    /* Prefer render size mapped back to logical coords; avoids oversized scr_h on maximize. */
+    if (render_w > 0 && dpi_scale.x > 0.0f) {
+        int logical_w = (int)((float)render_w / dpi_scale.x);
+        if (logical_w > 0)
+            ui_w = logical_w;
+    }
+    if (render_h > 0 && dpi_scale.y > 0.0f) {
+        int logical_h = (int)((float)render_h / dpi_scale.y);
+        if (logical_h > 0)
+            ui_h = logical_h;
+    }
     uint16_t term_cols = 1;
     uint16_t term_rows = 1;
     int grid_origin_x = tab_strip_w + pad;
     int grid_origin_y = pad;
-    clamp_tab_strip_w(scr_w, cell_width, pad, &tab_strip_w);
-    layout_terms(scr_w, scr_h, tab_strip_layout_w(tab_strip_collapsed, tab_strip_w),
+    clamp_tab_strip_w(ui_w, cell_width, pad, &tab_strip_w);
+    layout_terms(ui_w, ui_h, tab_strip_layout_w(tab_strip_collapsed, tab_strip_w),
                  cell_width, cell_height, pad, &term_cols, &term_rows,
                  &grid_origin_x, &grid_origin_y);
 
@@ -294,30 +309,44 @@ int main(int argc, char *argv[])
         goto cleanup;
     }
 
-    int prev_width = scr_w;
-    int prev_height = scr_h;
+    int prev_width = ui_w;
+    int prev_height = ui_h;
     bool prev_focused = IsWindowFocused();
     bool scrollbar_dragging = false;
 
     while (!WindowShouldClose()) {
         scr_w = GetScreenWidth();
         scr_h = GetScreenHeight();
+        render_w = GetRenderWidth();
+        render_h = GetRenderHeight();
+        ui_w = scr_w;
+        ui_h = scr_h;
+        /* Prefer render size mapped back to logical coords; avoids oversized scr_h on maximize. */
+        if (render_w > 0 && dpi_scale.x > 0.0f) {
+            int logical_w = (int)((float)render_w / dpi_scale.x);
+            if (logical_w > 0)
+                ui_w = logical_w;
+        }
+        if (render_h > 0 && dpi_scale.y > 0.0f) {
+            int logical_h = (int)((float)render_h / dpi_scale.y);
+            if (logical_h > 0)
+                ui_h = logical_h;
+        }
 
-        if (IsWindowResized()) {
-            int w = scr_w;
-            int h = scr_h;
-            if (w != prev_width || h != prev_height) {
-                clamp_tab_strip_w(w, cell_width, pad, &tab_strip_w);
-                layout_terms(w, h,
-                             tab_strip_layout_w(tab_strip_collapsed, tab_strip_w),
-                             cell_width, cell_height, pad, &term_cols,
-                             &term_rows, &grid_origin_x, &grid_origin_y);
-                for (size_t i = 0; i < n_tabs; i++)
-                    tab_resize_pty(tab_list[i], term_cols, term_rows, cell_width,
-                                   cell_height);
-                prev_width = w;
-                prev_height = h;
-            }
+        /* Do not rely only on IsWindowResized() — on Windows, maximize can change
+         * GetScreenWidth/Height without a reliable resize flag, leaving PTY/grid stale
+         * while UI draw uses new scr_h (tabs/+ would desync or appear "missing"). */
+        if (ui_w != prev_width || ui_h != prev_height) {
+            clamp_tab_strip_w(ui_w, cell_width, pad, &tab_strip_w);
+            layout_terms(ui_w, ui_h,
+                         tab_strip_layout_w(tab_strip_collapsed, tab_strip_w),
+                         cell_width, cell_height, pad, &term_cols, &term_rows,
+                         &grid_origin_x, &grid_origin_y);
+            for (size_t i = 0; i < n_tabs; i++)
+                tab_resize_pty(tab_list[i], term_cols, term_rows, cell_width,
+                               cell_height);
+            prev_width = ui_w;
+            prev_height = ui_h;
         }
 
         if (splitter_dragging && !tab_strip_collapsed) {
@@ -325,7 +354,7 @@ int main(int argc, char *argv[])
                 int nx = (int)GetMousePosition().x;
                 if (nx != tab_strip_w) {
                     tab_strip_w = nx;
-                    apply_strip_resize(scr_w, scr_h, &tab_strip_w,
+                    apply_strip_resize(ui_w, ui_h, &tab_strip_w,
                                        tab_strip_collapsed, cell_width,
                                        cell_height, pad, &term_cols,
                                        &term_rows, &grid_origin_x,
@@ -397,35 +426,35 @@ int main(int argc, char *argv[])
 
         int strip_w_eff = tab_strip_layout_w(tab_strip_collapsed, tab_strip_w);
 
-        if (tab_splitter_toggle_hit(mpos, strip_w_eff, scr_h))
+        if (tab_splitter_toggle_hit(mpos, strip_w_eff, ui_h))
             SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
         else if (!tab_strip_collapsed &&
-                 tab_splitter_hit(mpos, tab_strip_w, scr_h))
+                 tab_splitter_hit(mpos, tab_strip_w, ui_h))
             SetMouseCursor(MOUSE_CURSOR_RESIZE_EW);
         else
             SetMouseCursor(MOUSE_CURSOR_DEFAULT);
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            if (tab_splitter_toggle_hit(mpos, strip_w_eff, scr_h)) {
+            if (tab_splitter_toggle_hit(mpos, strip_w_eff, ui_h)) {
                 tab_strip_collapsed = !tab_strip_collapsed;
-                apply_strip_resize(scr_w, scr_h, &tab_strip_w, tab_strip_collapsed,
+                apply_strip_resize(ui_w, ui_h, &tab_strip_w, tab_strip_collapsed,
                                    cell_width, cell_height, pad, &term_cols,
                                    &term_rows, &grid_origin_x, &grid_origin_y,
                                    tab_list, n_tabs);
                 splitter_dragging = false;
             } else if (!tab_strip_collapsed &&
-                       tab_splitter_hit(mpos, tab_strip_w, scr_h)) {
+                       tab_splitter_hit(mpos, tab_strip_w, ui_h)) {
                 splitter_dragging = true;
                 scrollbar_dragging = false;
             } else if (mpos.x < (float)strip_w_eff && !splitter_dragging) {
                 size_t idx = 0;
                 TabStripAction act = TAB_STRIP_NONE;
-                if (tab_strip_hit(mpos, strip_w_eff, scr_h, n_tabs, &idx, &act,
+                if (tab_strip_hit(mpos, strip_w_eff, ui_h, n_tabs, &idx, &act,
                                    app_cfg.tab_title_h, app_cfg.tab_reserved_h,
                                    tab_strip_collapsed)) {
                     if (act == TAB_STRIP_NEW && n_tabs < MAX_TABS) {
                         edit_tab = TAB_EDIT_NONE;
-                        apply_strip_resize(scr_w, scr_h, &tab_strip_w,
+                        apply_strip_resize(ui_w, ui_h, &tab_strip_w,
                                            tab_strip_collapsed, cell_width,
                                            cell_height, pad, &term_cols,
                                            &term_rows, &grid_origin_x,
@@ -514,7 +543,7 @@ int main(int argc, char *argv[])
                          cur->terminal);
             if (!scrollbar_consumed && mpos.x >= (float)grid_origin_x &&
                 !(tab_strip_collapsed &&
-                  tab_splitter_toggle_hit(mpos, 0, scr_h)))
+                  tab_splitter_toggle_hit(mpos, 0, ui_h)))
                 handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
                              cur->terminal, cell_width, cell_height,
                              grid_origin_x, pad, pad, pad);
@@ -554,29 +583,30 @@ int main(int argc, char *argv[])
         render_terminal(render_state, row_iter, row_cells, mono_font, cell_width,
                         cell_height, font_size, scrollbar_ptr, grid_origin_x,
                         grid_origin_y, term_rows, pad);
+        /* Match render_terminal: logical size for DrawTextEx vs GetScreen* coords. */
         float tab_title_font_px =
-            (float)font_size_px * app_cfg.tab_title_font_scale;
+            (float)font_size * app_cfg.tab_title_font_scale;
         if (tab_title_font_px < 6.0f)
             tab_title_font_px = 6.0f;
         tab_strip_draw(mono_font, tab_title_font_px,
                        tab_strip_layout_w(tab_strip_collapsed, tab_strip_w),
-                       scr_h, tab_list, n_tabs, active, edit_tab, edit_buf,
+                       ui_h, tab_list, n_tabs, active, edit_tab, edit_buf,
                        strip_bg, tab_index_bg, tab_reserved_bg, tab_bg,
                        tab_active, border, tab_fg, edit_bg, app_cfg.tab_title_h,
                        app_cfg.tab_reserved_h, tab_strip_collapsed);
 
         if (!tab_strip_collapsed &&
-            (splitter_dragging || tab_splitter_hit(mpos, tab_strip_w, scr_h))) {
+            (splitter_dragging || tab_splitter_hit(mpos, tab_strip_w, ui_h))) {
             int sx = tab_strip_w - 1;
-            DrawRectangle(sx, 0, 2, scr_h, (Color){120, 160, 220, 255});
+            DrawRectangle(sx, 0, 2, ui_h, (Color){120, 160, 220, 255});
         }
 
         tab_splitter_toggle_draw(
             mono_font, tab_title_font_px,
-            tab_strip_layout_w(tab_strip_collapsed, tab_strip_w), scr_h,
+            tab_strip_layout_w(tab_strip_collapsed, tab_strip_w), ui_h,
             tab_strip_collapsed,
             tab_splitter_toggle_hit(mpos, tab_strip_collapsed ? 0 : tab_strip_w,
-                                    scr_h),
+                                    ui_h),
             tab_fg);
 
         if (cur->child_exited) {

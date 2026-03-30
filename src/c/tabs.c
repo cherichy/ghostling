@@ -10,6 +10,11 @@
 #include <unistd.h>
 #endif
 
+enum {
+    TAB_TOGGLE_W = 22,
+    TAB_TOGGLE_H = 28,
+};
+
 /** Fake bold for tab index digits without a separate bold font face. */
 static void draw_text_synthetic_bold(Font font, const char *text, Vector2 pos,
                                      float font_size, Color fg)
@@ -247,21 +252,30 @@ bool tab_splitter_hit(Vector2 mpos, int strip_w, int scr_h)
            mpos.x <= (float)(strip_w + TAB_SPLITTER_GRAB);
 }
 
+static float tab_icon_font_size(float base_font)
+{
+    float size = base_font * 1.3f;
+    if (size < base_font + 2.0f)
+        size = base_font + 2.0f;
+    return size;
+}
+
 /** Shared geometry for the collapse/expand affordance (splitter, vertical center). */
 static void tab_splitter_toggle_bounds(int effective_strip_w, int scr_h, int *tx,
                                      int *ty, int *tw, int *th)
 {
-    *tw = 20;
-    *th = 26;
-    *tx = effective_strip_w - *tw / 2;
+    *tw = TAB_TOGGLE_W;
+    *th = TAB_TOGGLE_H;
+    /* Align right edge to splitter line at x = strip_w - 1. */
+    *tx = effective_strip_w - *tw - 1;
     *ty = scr_h / 2 - *th / 2;
 }
 
 /** Collapsed: small rect near left edge, vertically centered (matches tab_splitter_toggle_draw). */
 static void tab_collapsed_expand_bounds(int scr_h, int *tx, int *ty, int *tw, int *th)
 {
-    *tw = 20;
-    *th = 26;
+    *tw = TAB_TOGGLE_W;
+    *th = TAB_TOGGLE_H;
     *tx = (TAB_COLLAPSED_EDGE_HOVER - *tw) / 2;
     if (*tx < 0)
         *tx = 0;
@@ -428,8 +442,13 @@ void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
     DrawRectangle(0, new_y0, strip_w - 1, TAB_NEW_H, tab_bg);
     DrawRectangle(0, new_y0, strip_w - 1, 1, border);
     const char *plus = "+";
-    Vector2 ps = MeasureTextEx(font, plus, font_size, 0);
-    draw_text_synthetic_bold(font, plus, (Vector2){((float)strip_w - ps.x) * 0.5f, (float)new_y0 + ((float)TAB_NEW_H - ps.y) * 0.5f}, font_size, fg);
+    float icon_font = tab_icon_font_size(font_size);
+    Vector2 ps = MeasureTextEx(font, plus, icon_font, 0);
+    draw_text_synthetic_bold(
+        font, plus,
+        (Vector2){((float)strip_w - ps.x) * 0.5f,
+                  (float)new_y0 + ((float)TAB_NEW_H - ps.y) * 0.5f},
+        icon_font, fg);
 }
 
 void tab_splitter_toggle_draw(Font font, float font_size, int strip_w, int scr_h,
@@ -437,23 +456,24 @@ void tab_splitter_toggle_draw(Font font, float font_size, int strip_w, int scr_h
 {
     if (!show)
         return;
+    float icon_font = tab_icon_font_size(font_size);
     if (strip_collapsed) {
         int tx, ty, tw, th;
         tab_collapsed_expand_bounds(scr_h, &tx, &ty, &tw, &th);
         const char *ch = ">";
-        Vector2 cs = MeasureTextEx(font, ch, font_size, 0);
+        Vector2 cs = MeasureTextEx(font, ch, icon_font, 0);
         DrawTextEx(font, ch,
                    (Vector2){(float)tx + ((float)tw - cs.x) * 0.5f,
                              (float)ty + ((float)th - cs.y) * 0.5f},
-                   font_size, 0, fg);
+                   icon_font, 0, fg);
         return;
     }
     int tx, ty, tw, th;
     tab_splitter_toggle_bounds(strip_w, scr_h, &tx, &ty, &tw, &th);
     const char *lt = "<";
-    Vector2 ls = MeasureTextEx(font, lt, font_size, 0);
+    Vector2 ls = MeasureTextEx(font, lt, icon_font, 0);
     DrawTextEx(font, lt,
                (Vector2){(float)tx + ((float)tw - ls.x) * 0.5f,
                          (float)ty + ((float)th - ls.y) * 0.5f},
-               font_size, 0, fg);
+               icon_font, 0, fg);
 }
