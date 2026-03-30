@@ -8,6 +8,8 @@ typedef struct {
     char font_path[4096];
     int font_size;
     bool font_path_from_config;
+    /** Codepoint set for font atlas: full | compact | latin. Default full. */
+    char font_codepoint_set[16];
     /** Tab title row uses mono font at (font_size_px * this). Default 0.8. */
     float tab_title_font_scale;
     /** Height in pixels of the top band (title + close). Default 18. */
@@ -17,7 +19,7 @@ typedef struct {
 } AppConfig;
 
 void config_load(AppConfig *cfg);
-int *build_terminal_codepoints(int *out_count);
+int *build_terminal_codepoints(const char *set_name, int *out_count);
 Font load_terminal_font(const char *path, const unsigned char *embed,
                         int embed_size, int font_size_px, int *codepoints,
                         int cp_count);

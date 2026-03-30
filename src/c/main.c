@@ -160,12 +160,18 @@ int main(int argc, char *argv[])
 
     InitWindow(800, 600, "ghostling");
     SetWindowState(FLAG_WINDOW_RESIZABLE);
-    SetTargetFPS(60);
+    const int fps_active = 60;
+    const int fps_idle = 8;
+    const int fps_unfocused = 4;
+    const double active_grace_sec = 0.30;
+    int target_fps = fps_active;
+    SetTargetFPS(target_fps);
 
     Vector2 dpi_scale = GetWindowScaleDPI();
 
     int cp_count = 0;
-    int *codepoints = build_terminal_codepoints(&cp_count);
+    int *codepoints =
+        build_terminal_codepoints(app_cfg.font_codepoint_set, &cp_count);
     if (!codepoints || cp_count <= 0) {
         fprintf(stderr, "ghostling: out of memory building codepoint list\n");
         CloseWindow();
@@ -180,6 +186,14 @@ int main(int argc, char *argv[])
         font_path_try, font_jetbrains_mono, (int)sizeof(font_jetbrains_mono),
         font_size_px, codepoints, cp_count);
     free(codepoints);
+
+    int atlas_bytes = GetPixelDataSize(mono_font.texture.width,
+                                       mono_font.texture.height,
+                                       mono_font.texture.format);
+    fprintf(stderr,
+            "ghostling: font atlas set=%s codepoints=%d texture=%dx%d (~%.1f MiB)\n",
+            app_cfg.font_codepoint_set, cp_count, mono_font.texture.width,
+            mono_font.texture.height, (double)atlas_bytes / (1024.0 * 1024.0));
 
     SetTextureFilter(mono_font.texture, TEXTURE_FILTER_BILINEAR);
 
@@ -313,8 +327,13 @@ int main(int argc, char *argv[])
     int prev_height = ui_h;
     bool prev_focused = IsWindowFocused();
     bool scrollbar_dragging = false;
+    double last_activity_t = GetTime();
+    Vector2 prev_mouse_pos = GetMousePosition();
+    char window_title_cache[280];
+    window_title_cache[0] = '\0';
 
     while (!WindowShouldClose()) {
+        bool frame_activity = false;
         scr_w = GetScreenWidth();
         scr_h = GetScreenHeight();
         render_w = GetRenderWidth();
@@ -347,6 +366,7 @@ int main(int argc, char *argv[])
                                cell_height);
             prev_width = ui_w;
             prev_height = ui_h;
+            frame_activity = true;
         }
 
         if (splitter_dragging && !tab_strip_collapsed) {
@@ -359,6 +379,7 @@ int main(int argc, char *argv[])
                                        cell_height, pad, &term_cols,
                                        &term_rows, &grid_origin_x,
                                        &grid_origin_y, tab_list, n_tabs);
+                    frame_activity = true;
                 }
             } else {
                 splitter_dragging = false;
@@ -383,14 +404,17 @@ int main(int argc, char *argv[])
                     pty_write(tab_pty_write(cur), focus_buf, focus_written);
             }
             prev_focused = focused;
+            frame_activity = true;
         }
 
         for (size_t i = 0; i < n_tabs; i++) {
             if (tab_list[i]->child_exited)
                 continue;
             PtyReadResult pr = tab_drain(tab_list[i]);
-            if (pr != PTY_READ_OK)
+            if (pr != PTY_READ_OK) {
                 tab_list[i]->child_exited = true;
+                frame_activity = true;
+            }
         }
 
         for (size_t i = 0; i < n_tabs; i++) {
@@ -423,6 +447,19 @@ int main(int argc, char *argv[])
         Tab *cur = tab_list[active];
 
         Vector2 mpos = GetMousePosition();
+        if (mpos.x != prev_mouse_pos.x || mpos.y != prev_mouse_pos.y)
+            frame_activity = true;
+        prev_mouse_pos = mpos;
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) ||
+            IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) ||
+            IsMouseButtonPressed(MOUSE_BUTTON_MIDDLE) ||
+            IsMouseButtonReleased(MOUSE_BUTTON_LEFT) ||
+            IsMouseButtonReleased(MOUSE_BUTTON_RIGHT) ||
+            IsMouseButtonReleased(MOUSE_BUTTON_MIDDLE) ||
+            IsMouseButtonDown(MOUSE_BUTTON_LEFT) ||
+            IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
+            IsMouseButtonDown(MOUSE_BUTTON_MIDDLE))
+            frame_activity = true;
 
         int strip_w_eff = tab_strip_layout_w(tab_strip_collapsed, tab_strip_w);
 
@@ -508,17 +545,21 @@ int main(int argc, char *argv[])
         cur = tab_list[active];
 
         if (edit_tab != TAB_EDIT_NONE) {
-            if (IsKeyPressed(KEY_ESCAPE))
+            if (IsKeyPressed(KEY_ESCAPE)) {
                 edit_tab = TAB_EDIT_NONE;
-            else if (IsKeyPressed(KEY_ENTER)) {
+                frame_activity = true;
+            } else if (IsKeyPressed(KEY_ENTER)) {
                 snprintf(tab_list[edit_tab]->effects.title_override,
                          sizeof(tab_list[edit_tab]->effects.title_override),
                          "%s", edit_buf);
                 edit_tab = TAB_EDIT_NONE;
+                frame_activity = true;
             } else {
                 if (IsKeyPressed(KEY_BACKSPACE) ||
-                    IsKeyPressedRepeat(KEY_BACKSPACE))
+                    IsKeyPressedRepeat(KEY_BACKSPACE)) {
                     utf8_pop_back(edit_buf);
+                    frame_activity = true;
+                }
                 int ch;
                 while ((ch = GetCharPressed()) != 0) {
                     size_t len = strlen(edit_buf);
@@ -529,6 +570,7 @@ int main(int argc, char *argv[])
                     if (len + (size_t)n < sizeof(edit_buf)) {
                         memcpy(edit_buf + len, u8, (size_t)n);
                         edit_buf[len + (size_t)n] = '\0';
+                        frame_activity = true;
                     }
                 }
             }
@@ -537,25 +579,50 @@ int main(int argc, char *argv[])
         bool scrollbar_consumed = handle_scrollbar(
             cur->terminal, render_state, &scrollbar_dragging, grid_origin_x,
             grid_origin_y, term_rows, cell_height, pad);
+        if (scrollbar_consumed || scrollbar_dragging)
+            frame_activity = true;
 
         if (!cur->child_exited && edit_tab == TAB_EDIT_NONE) {
-            handle_input(tab_pty_write(cur), key_encoder, key_event,
-                         cur->terminal);
+            if (handle_input(tab_pty_write(cur), key_encoder, key_event,
+                             cur->terminal))
+                frame_activity = true;
             if (!scrollbar_consumed && mpos.x >= (float)grid_origin_x &&
                 !(tab_strip_collapsed &&
                   tab_splitter_toggle_hit(mpos, 0, ui_h)))
-                handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
-                             cur->terminal, cell_width, cell_height,
-                             grid_origin_x, pad, pad, pad);
+                if (handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
+                                 cur->terminal, cell_width, cell_height,
+                                 grid_origin_x, pad, pad, pad))
+                    frame_activity = true;
         }
 
         ghostty_render_state_update(render_state, cur->terminal);
+        GhosttyRenderStateDirty render_dirty = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
+        if (ghostty_render_state_get(render_state, GHOSTTY_RENDER_STATE_DATA_DIRTY,
+                                     &render_dirty) == GHOSTTY_SUCCESS &&
+            render_dirty != GHOSTTY_RENDER_STATE_DIRTY_FALSE)
+            frame_activity = true;
 
         char wtitle[280];
         char disp[256];
         tab_display_title(cur, active + 1, disp, sizeof(disp));
         snprintf(wtitle, sizeof(wtitle), "%s", disp[0] != '\0' ? disp : "ghostling");
-        SetWindowTitle(wtitle);
+        if (strcmp(window_title_cache, wtitle) != 0) {
+            SetWindowTitle(wtitle);
+            snprintf(window_title_cache, sizeof(window_title_cache), "%s",
+                     wtitle);
+            frame_activity = true;
+        }
+
+        double now_t = GetTime();
+        if (frame_activity)
+            last_activity_t = now_t;
+        bool active_recent = (now_t - last_activity_t) < active_grace_sec;
+        int desired_fps = focused ? (active_recent ? fps_active : fps_idle)
+                                  : (active_recent ? fps_idle : fps_unfocused);
+        if (desired_fps != target_fps) {
+            SetTargetFPS(desired_fps);
+            target_fps = desired_fps;
+        }
 
         GhosttyRenderStateColors bg_colors =
             GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);

@@ -188,11 +188,12 @@ static void mouse_encode_and_write(PtyHandle pty_fd, GhosttyMouseEncoder encoder
         pty_write(pty_fd, buf, written);
 }
 
-void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
+bool handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
                   GhosttyMouseEvent event, GhosttyTerminal terminal,
                   int cell_width, int cell_height, int pad_left, int pad_top,
                   int pad_right, int pad_bottom)
 {
+    bool had_event = false;
     ghostty_mouse_encoder_setopt_from_terminal(encoder, terminal);
 
     int scr_w = GetScreenWidth();
@@ -242,10 +243,12 @@ void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
             ghostty_mouse_event_set_action(event, GHOSTTY_MOUSE_ACTION_PRESS);
             ghostty_mouse_event_set_button(event, gbtn);
             mouse_encode_and_write(pty_fd, encoder, event);
+            had_event = true;
         } else if (IsMouseButtonReleased(rl_btn)) {
             ghostty_mouse_event_set_action(event, GHOSTTY_MOUSE_ACTION_RELEASE);
             ghostty_mouse_event_set_button(event, gbtn);
             mouse_encode_and_write(pty_fd, encoder, event);
+            had_event = true;
         }
     }
 
@@ -261,6 +264,7 @@ void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
         else
             ghostty_mouse_event_clear_button(event);
         mouse_encode_and_write(pty_fd, encoder, event);
+        had_event = true;
     }
 
     float wheel = GetMouseWheelMove();
@@ -286,12 +290,16 @@ void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
             };
             ghostty_terminal_scroll_viewport(terminal, sv);
         }
+        had_event = true;
     }
+
+    return had_event;
 }
 
-void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
+bool handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
                   GhosttyKeyEvent event, GhosttyTerminal terminal)
 {
+    bool had_event = false;
     ghostty_key_encoder_setopt_from_terminal(encoder, terminal);
 
     char char_utf8[64];
@@ -303,6 +311,7 @@ void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
         if (char_utf8_len + n < (int)sizeof(char_utf8)) {
             memcpy(&char_utf8[char_utf8_len], u8, (size_t)n);
             char_utf8_len += n;
+            had_event = true;
         }
     }
 
@@ -337,6 +346,7 @@ void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
         bool released = IsKeyReleased(rl_key);
         if (!pressed && !repeated && !released)
             continue;
+        had_event = true;
 
         GhosttyKey gkey = raylib_key_to_ghostty(rl_key);
         if (gkey == GHOSTTY_KEY_UNIDENTIFIED)
@@ -378,6 +388,8 @@ void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
 
     if (char_utf8_len > 0)
         pty_write(pty_fd, char_utf8, (size_t)char_utf8_len);
+
+    return had_event;
 }
 
 bool handle_scrollbar(GhosttyTerminal terminal, GhosttyRenderState render_state,

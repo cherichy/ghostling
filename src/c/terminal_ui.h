@@ -6,11 +6,11 @@
 #include "raylib.h"
 
 void log_build_info(void);
-void handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
+bool handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
                   GhosttyMouseEvent event, GhosttyTerminal terminal,
                   int cell_width, int cell_height, int pad_left, int pad_top,
                   int pad_right, int pad_bottom);
-void handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
+bool handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
                   GhosttyKeyEvent event, GhosttyTerminal terminal);
 bool handle_scrollbar(GhosttyTerminal terminal, GhosttyRenderState render_state,
                       bool *dragging, int grid_origin_x, int grid_origin_y,

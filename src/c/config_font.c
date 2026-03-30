@@ -47,6 +47,22 @@ static bool config_default_path(char *out, size_t out_sz)
 #endif
 }
 
+static void ascii_lower_copy(char *out, size_t out_sz, const char *in)
+{
+    if (out_sz == 0)
+        return;
+    size_t i = 0;
+    for (; i + 1 < out_sz && in[i] != '\0'; i++)
+        out[i] = (char)tolower((unsigned char)in[i]);
+    out[i] = '\0';
+}
+
+static bool codepoint_set_valid(const char *set_name)
+{
+    return strcmp(set_name, "full") == 0 || strcmp(set_name, "compact") == 0 ||
+           strcmp(set_name, "latin") == 0;
+}
+
 static void config_load_file(const char *path, AppConfig *cfg)
 {
     FILE *f = fopen(path, "rb");
@@ -72,6 +88,13 @@ static void config_load_file(const char *path, AppConfig *cfg)
             if (*val) {
                 snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", val);
                 cfg->font_path_from_config = true;
+            }
+        } else if (strcmp(key, "font_codepoint_set") == 0) {
+            char lowered[16];
+            ascii_lower_copy(lowered, sizeof(lowered), val);
+            if (codepoint_set_valid(lowered)) {
+                snprintf(cfg->font_codepoint_set,
+                         sizeof(cfg->font_codepoint_set), "%s", lowered);
             }
         } else if (strcmp(key, "font_size") == 0) {
             char *end = NULL;
@@ -103,6 +126,8 @@ void config_load(AppConfig *cfg)
     cfg->font_path[0] = '\0';
     cfg->font_size = 16;
     cfg->font_path_from_config = false;
+    snprintf(cfg->font_codepoint_set, sizeof(cfg->font_codepoint_set), "%s",
+             "full");
     cfg->tab_title_font_scale = 0.8f;
     cfg->tab_title_h = 18;
     cfg->tab_reserved_h = 24;
@@ -129,13 +154,16 @@ static bool append_range(int *buf, int *n, int cap, int lo, int hi)
     return true;
 }
 
-int *build_terminal_codepoints(int *out_count)
+int *build_terminal_codepoints(const char *set_name, int *out_count)
 {
     const int cap = 32768;
     int *cp = (int *)malloc((size_t)cap * sizeof(int));
     if (!cp)
         return NULL;
     int n = 0;
+    const char *set = set_name;
+    if (!set || !codepoint_set_valid(set))
+        set = "full";
 
 #define R(lo, hi)                                                              \
     do {                                                                       \
@@ -145,6 +173,7 @@ int *build_terminal_codepoints(int *out_count)
         }                                                                      \
     } while (0)
 
+    /* Base set shared by all profiles: Latin + symbols + box drawing. */
     R(0x20, 0x7E);
     R(0xA0, 0x024F);
     R(0x0300, 0x036F);
@@ -160,15 +189,23 @@ int *build_terminal_codepoints(int *out_count)
     R(0x25A0, 0x25FF);
     R(0x2600, 0x26FF);
     R(0x2700, 0x27BF);
-    R(0x3000, 0x30FF);
-    R(0x31F0, 0x31FF);
-    R(0x3200, 0x32FF);
-    R(0x3300, 0x33FF);
-    R(0x3400, 0x4DBF);
-    R(0x4E00, 0x9FFF);
-    R(0xFE10, 0xFE1F);
-    R(0xFE30, 0xFE4F);
-    R(0xFF00, 0xFFEF);
+
+    if (strcmp(set, "latin") != 0) {
+        /* Compact/full keep CJK core blocks for Chinese/Japanese/Korean text. */
+        R(0x3000, 0x30FF);
+        R(0x31F0, 0x31FF);
+        R(0x4E00, 0x9FFF);
+        R(0xFF00, 0xFFEF);
+    }
+
+    if (strcmp(set, "full") == 0) {
+        /* Full profile keeps all legacy ranges from the previous default. */
+        R(0x3200, 0x32FF);
+        R(0x3300, 0x33FF);
+        R(0x3400, 0x4DBF);
+        R(0xFE10, 0xFE1F);
+        R(0xFE30, 0xFE4F);
+    }
 #undef R
 
     *out_count = n;

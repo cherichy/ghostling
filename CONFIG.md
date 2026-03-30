@@ -1,6 +1,6 @@
 # Ghostling 配置文件说明
 
-程序启动时会读取一个纯文本配置文件，用来设置**字体**、**字号**和**侧栏 Tab 行高/标题缩放**等。仓库根目录提供一份 **`config.example`**（含当前支持的全部键与默认值说明），可复制到下文路径并改名为 `config`。
+程序启动时会读取一个纯文本配置文件，用来设置**字体**、**字号**、**字形集合（内存/启动耗时）**和**侧栏 Tab 行高/标题缩放**等。仓库根目录提供一份 **`config.example`**（含当前支持的全部键与默认值说明），可复制到下文路径并改名为 `config`。
 
 不创建配置文件也可以运行：会优先尝试仓库内的 **`fonts/MapleMono-NF-CN-Regular.ttf`**（相对**当前工作目录**）；若该路径不可读或加载失败，C 构建会回退到内嵌 JetBrains Mono，Zig 构建同样会回退到内嵌字体（**不含中文大字集**，中文可能仍显示为缺字）。
 
@@ -45,6 +45,20 @@
 - **范围**：`6`～`256`（超出范围的值会被忽略，仍使用默认字号）。
 - **默认**：`16`（未写该项时）。
 
+### `font_codepoint_set`
+
+- **含义**：控制字体图集要预加载的 codepoint 集合，直接影响启动耗时和内存占用。
+- **类型**：字符串（大小写不敏感）。
+- **可选值**：
+  - `full`：完整集合（默认，兼容旧行为，约 31k codepoints）
+  - `compact`：常用 CJK + 全角 + 基础符号（约 24k codepoints）
+  - `latin`：拉丁/符号/框线（不含 CJK，约 4k codepoints）
+- **默认**：`full`。
+- **建议**：
+  - 主要跑英文工具链：优先 `latin`，内存显著下降。
+  - 需要中日韩文本但不依赖冷门兼容区：选 `compact`。
+  - 追求最大兼容：保留 `full`。
+
 ### `tab_title_font_scale`
 
 - **含义**：侧栏里 Tab 标题、`×`、底部 `+` 的字号，相对 PTY 栅格字体的缩放（内部为 `font_size` 经 DPI 后的像素再乘本系数）。
@@ -82,6 +96,7 @@ font_path = fonts/MapleMono-NF-CN-Regular.ttf
 ```text
 font_path = fonts/MapleMono-NF-CN-Regular.ttf
 font_size = 14
+font_codepoint_set = compact
 ```
 
 **Linux 示例：**
@@ -106,7 +121,7 @@ font_size = 16
 | 现象 | 可能原因 |
 |------|----------|
 | 中文仍是问号 / 方块 | 当前 TTF 不含对应字形，或字体文件未成功加载（已回退到内嵌字体）。请检查 `font_path` 与文件是否存在。 |
-| 启动变慢 | 程序会为终端常用 Unicode 区间生成较大字形图集，属预期行为；换用字重更大或路径异常的字体不会改善图集大小本身。 |
+| 启动变慢 / 内存高 | 程序会按 `font_codepoint_set` 生成字形图集；`full` 集合最大。可改成 `compact` 或 `latin` 降低开销。 |
 | 修改配置不生效 | 确认文件路径是否为 `%APPDATA%\ghostling\config`（Windows）或 `~/.config/ghostling/config`（Unix），且保存后需**重新启动**程序。 |
 
 ---

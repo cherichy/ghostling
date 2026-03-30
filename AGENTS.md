@@ -32,6 +32,7 @@ Plain `key=value` lines, `#` comments. Loaded from `%APPDATA%\ghostling\config` 
 |-----|---------|
 | `font_path` | TTF path (default: bundled Maple Mono path) |
 | `font_size` | PTY grid size in points (default 16) |
+| `font_codepoint_set` | Font atlas codepoint profile: `full` (default), `compact`, `latin` (lower memory/faster startup trade-off) |
 | `tab_title_font_scale` | Tab title / `×` / `+` vs grid font: `font_size_px * this` (default `0.8`, range about 0.2–2) |
 | `tab_title_h` | Pixel height of the **top** band (title + close), default `18` |
 | `tab_reserved_h` | Pixel height of the **bottom** reserved band per tab, default `24` |
