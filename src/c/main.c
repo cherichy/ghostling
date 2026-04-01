@@ -170,11 +170,20 @@ static void mouse_to_cell_clamped(Vector2 mpos, int grid_origin_x,
     *out_y = (uint16_t)row;
 }
 
+static bool shortcut_primary_modifier_down(void)
+{
+#if defined(__APPLE__)
+    return IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER);
+#else
+    return IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+#endif
+}
+
 static bool selection_copy_shortcut_pressed(GhostlingCopyShortcut shortcut)
 {
-    bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool primary = shortcut_primary_modifier_down();
     bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-    if (!ctrl)
+    if (!primary)
         return false;
 
     if (shortcut == GHOSTLING_COPY_SHORTCUT_CTRL_SHIFT_C)
@@ -185,9 +194,9 @@ static bool selection_copy_shortcut_pressed(GhostlingCopyShortcut shortcut)
 
 static bool paste_shortcut_pressed(GhostlingPasteShortcut shortcut)
 {
-    bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool primary = shortcut_primary_modifier_down();
     bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-    if (!ctrl)
+    if (!primary)
         return false;
 
     if (shortcut == GHOSTLING_PASTE_SHORTCUT_NONE)

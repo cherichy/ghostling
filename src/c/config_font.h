@@ -29,9 +29,9 @@ typedef struct {
     int tab_reserved_h;
     /** Copy selected text immediately on mouse release. Default true. */
     bool selection_copy_on_select;
-    /** Key chord used to copy a local mouse selection. Default Ctrl+C. */
+    /** Key chord used to copy a local mouse selection. Default: Ctrl+C (Cmd+C on macOS). */
     GhostlingCopyShortcut selection_copy_shortcut;
-    /** Key chord used to paste host clipboard into PTY. Default Ctrl+Shift+V. */
+    /** Key chord used to paste host clipboard into PTY. Default: Ctrl+Shift+V (Ctrl+V/Cmd+V on macOS). */
     GhostlingPasteShortcut paste_shortcut;
 } AppConfig;
 

@@ -311,7 +311,11 @@ void config_load(AppConfig *cfg)
     cfg->tab_reserved_h = 24;
     cfg->selection_copy_on_select = true;
     cfg->selection_copy_shortcut = GHOSTLING_COPY_SHORTCUT_CTRL_C;
+#if defined(__APPLE__)
+    cfg->paste_shortcut = GHOSTLING_PASTE_SHORTCUT_CTRL_V;
+#else
     cfg->paste_shortcut = GHOSTLING_PASTE_SHORTCUT_CTRL_SHIFT_V;
+#endif
 
     char path[4096];
     if (config_default_path(path, sizeof(path)))

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #ifndef _WIN32
+#include "pty_unix.h"
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>

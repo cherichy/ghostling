@@ -44,10 +44,12 @@ selection_copy_on_select = true
 # 本地选区的复制快捷键（当存在选区时优先复制，不再把 Ctrl+C 发送给 shell）：
 #   ctrl+c（默认）
 #   ctrl+shift+c
+# macOS 上会把上述 Ctrl 自动映射为 Command（例如 Command+C）。
 selection_copy_shortcut = ctrl+c
 
 # 粘贴系统剪贴板到 PTY 的快捷键：
-#   ctrl+shift+v（默认，推荐，不干扰 shell/TUI 的 ctrl+v）
-#   ctrl+v
+#   ctrl+shift+v（Windows/Linux 默认，推荐，不干扰 shell/TUI 的 ctrl+v）
+#   ctrl+v（macOS 默认，会映射为 Command+V）
 #   none（禁用终端级粘贴快捷键）
-paste_shortcut = ctrl+shift+v
+# macOS 上会把上述 Ctrl 自动映射为 Command（例如 Command+V）。
+paste_shortcut = ctrl+v

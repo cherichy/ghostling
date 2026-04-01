@@ -94,6 +94,7 @@
 - **可选值**：
   - `ctrl+c`（默认）
   - `ctrl+shift+c`
+- **跨平台说明**：在 macOS 上，以上 `ctrl` 语义会自动映射为 `command`（即 `cmd+c` / `cmd+shift+c`）。
 - **说明**：当存在本地选区并命中该快捷键时，ghostling 会优先复制，不再把该组合转发给 shell。
 
 ### `paste_shortcut`
@@ -101,9 +102,10 @@
 - **含义**：把系统剪贴板内容粘贴到当前 PTY 的快捷键。
 - **类型**：字符串。
 - **可选值**：
-  - `ctrl+shift+v`（默认，推荐）
-  - `ctrl+v`
+  - `ctrl+shift+v`（Windows/Linux 默认，推荐）
+  - `ctrl+v`（macOS 默认）
   - `none`
+- **跨平台说明**：在 macOS 上，以上 `ctrl` 语义会自动映射为 `command`（即 `cmd+shift+v` / `cmd+v`）。
 - **说明**：启用 `ctrl+shift+v` 可避免与 shell/TUI 的 `ctrl+v` 语义冲突。若应用开启 bracketed paste，ghostling 会自动包裹 `ESC[200~...ESC[201~`。
 
 ---
