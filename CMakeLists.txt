@@ -56,6 +56,7 @@ set(GHOSTLING_C_SOURCES
   src/c/main.c
   src/c/pty_common.c
   src/c/config_font.c
+  src/c/osc52_clipboard.c
   src/c/effects.c
   src/c/tabs.c
   src/c/terminal_ui.c

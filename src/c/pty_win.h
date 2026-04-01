@@ -2,6 +2,7 @@
 #define GHOSTLING_PTY_WIN_H
 
 #include "pty_common.h"
+#include "osc52_clipboard.h"
 #include <ghostty/vt.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,7 +28,8 @@ void win_perror(const char *prefix);
 bool pty_spawn_win32(PtyContext *ctx, uint16_t cols, uint16_t rows,
                      const char *shell_override);
 DWORD WINAPI pty_reader_thread(LPVOID param);
-PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal);
+PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal,
+                            Osc52ClipboardState *osc52);
 void pty_resize_win32(HPCON hpc, uint16_t cols, uint16_t rows);
 void pty_cleanup_win(PtyContext *ctx);
 

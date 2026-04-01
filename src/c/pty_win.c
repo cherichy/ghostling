@@ -207,7 +207,8 @@ DWORD WINAPI pty_reader_thread(LPVOID param)
     }
 }
 
-PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal)
+PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal,
+                            Osc52ClipboardState *osc52)
 {
     uint8_t local[PTY_BUF_SIZE];
     size_t count = 0;
@@ -222,8 +223,10 @@ PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal)
     is_eof = rb->eof;
     LeaveCriticalSection(&rb->cs);
 
-    if (count > 0)
+    if (count > 0) {
+        osc52_clipboard_scan(osc52, local, count);
         ghostty_terminal_vt_write(terminal, local, count);
+    }
 
     if (count == 0 && is_eof)
         return PTY_READ_EOF;

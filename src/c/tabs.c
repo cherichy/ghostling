@@ -55,6 +55,7 @@ static void truncate_to_width(Font font, float font_size, const char *src,
 void tab_init_struct(Tab *t)
 {
     memset(t, 0, sizeof(*t));
+    osc52_clipboard_init(&t->osc52);
 #ifdef _WIN32
     t->pty_ctx.hpc = INVALID_HANDLE_VALUE;
     t->pty_ctx.process = INVALID_HANDLE_VALUE;
@@ -102,6 +103,8 @@ void tab_free(Tab *t)
         t->child = -1;
     }
 #endif
+
+    osc52_clipboard_deinit(&t->osc52);
 
     memset(t, 0, sizeof(*t));
 #ifdef _WIN32
@@ -230,9 +233,9 @@ PtyReadResult tab_drain(Tab *t)
     if (!t->in_use || t->child_exited)
         return PTY_READ_OK;
 #ifdef _WIN32
-    return pty_buf_drain(&t->pty_rb, t->terminal);
+    return pty_buf_drain(&t->pty_rb, t->terminal, &t->osc52);
 #else
-    return pty_read_unix(t->pty_fd, t->terminal);
+    return pty_read_unix(t->pty_fd, t->terminal, &t->osc52);
 #endif
 }
 

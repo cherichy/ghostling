@@ -65,12 +65,14 @@ int pty_spawn_unix(pid_t *child_out, uint16_t cols, uint16_t rows,
     return pty_fd;
 }
 
-PtyReadResult pty_read_unix(int pty_fd, GhosttyTerminal terminal)
+PtyReadResult pty_read_unix(int pty_fd, GhosttyTerminal terminal,
+                            Osc52ClipboardState *osc52)
 {
     uint8_t buf[4096];
     for (;;) {
         ssize_t n = read(pty_fd, buf, sizeof(buf));
         if (n > 0) {
+            osc52_clipboard_scan(osc52, buf, (size_t)n);
             ghostty_terminal_vt_write(terminal, buf, (size_t)n);
         } else if (n == 0) {
             return PTY_READ_EOF;

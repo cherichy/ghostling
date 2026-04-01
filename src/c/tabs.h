@@ -4,6 +4,7 @@
 #include "raylib.h"
 
 #include "effects.h"
+#include "osc52_clipboard.h"
 #include "pty_common.h"
 #include <ghostty/vt.h>
 #include <stdbool.h>
@@ -38,6 +39,7 @@ typedef struct Tab {
 #endif
     GhosttyTerminal terminal;
     EffectsContext effects;
+    Osc52ClipboardState osc52;
 #ifdef _WIN32
     PtyContext pty_ctx;
     PtyReadBuf pty_rb;

@@ -31,7 +31,8 @@ bool effect_device_attributes(GhosttyTerminal terminal, void *userdata,
     out_attrs->primary.features[0] = GHOSTTY_DA_FEATURE_COLUMNS_132;
     out_attrs->primary.features[1] = GHOSTTY_DA_FEATURE_SELECTIVE_ERASE;
     out_attrs->primary.features[2] = GHOSTTY_DA_FEATURE_ANSI_COLOR;
-    out_attrs->primary.num_features = 3;
+    out_attrs->primary.features[3] = GHOSTTY_DA_FEATURE_CLIPBOARD;
+    out_attrs->primary.num_features = 4;
 
     out_attrs->secondary.device_type = GHOSTTY_DA_DEVICE_TYPE_VT220;
     out_attrs->secondary.firmware_version = 1;
