@@ -22,6 +22,7 @@
 - 一行一个选项，形式为 **`键 = 值`**，等号两侧可以有空格。
 - 以 **`#`** 开头的行视为注释；空行会被忽略。
 - 键名区分大小写，请使用下文所列的英文键名。
+- 支持 profile 覆盖键：`profile.<name>.<key> = value`（例如 `profile.work.font_size = 14`）。
 
 ---
 
@@ -63,6 +64,42 @@
   - 主要中文、希望更小初始图集：选 `han3500`。
   - 追求最大兼容：保留 `full`。
 - **分层自动升级**：当 `font_codepoint_set` 为 `han3500` 或 `han6500` 时，运行中检测到当前层级缺失的规范汉字会自动升级到下一层（`3500 -> 6500 -> 8105`），减少一次性全量加载成本。
+
+### `profile`
+
+- **含义**：选择当前启用的 profile 名称。
+- **类型**：字符串。
+- **默认**：空（仅使用全局键）。
+- **优先级**：环境变量 `GHOSTLING_PROFILE` > 配置中的 `profile = ...` > 空。
+
+### 全局快捷键配置
+
+- 支持键：`a-z`、`0-9`、`tab`、`f5..f12`。
+- 修饰键：`primary`、`ctrl`、`shift`、`alt`、`super`。
+- `primary` 在 macOS 上映射为 `command`，在 Windows/Linux 映射为 `ctrl`。
+- 写法示例：`primary+t`、`primary+shift+tab`、`alt+f8`。
+- 可用 `none` / `off` / `disabled` 禁用某个快捷键。
+
+可配置项：
+
+- `key_new_tab`（默认 `primary+t`）
+- `key_close_tab`（默认 `primary+w`）
+- `key_next_tab`（默认 `primary+tab`）
+- `key_prev_tab`（默认 `primary+shift+tab`）
+- `key_toggle_tab_strip`（默认 `primary+b`）
+- `key_reload_config`（默认 `primary+shift+r`）
+
+### 配置热加载
+
+- 程序会监控当前加载的配置文件修改时间，变更后自动重载。
+- 也可通过 `key_reload_config` 手动重载。
+- 重载时字体/码表相关项变更会触发图集重建。
+
+### OSC 7 / OSC 133 / OSC 8 当前行为
+
+- OSC 7（PWD）：会读取并更新内部工作目录状态，并用于窗口标题回退显示。
+- OSC 133（Prompt marks）：由 libghostty-vt 解析并存储语义信息（当前版本尚未做可视化 UI）。
+- OSC 8（Hyperlink）：可检测单元格是否带超链接并在悬停时显示手型光标。
 
 ### `tab_title_font_scale`
 

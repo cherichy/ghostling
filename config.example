@@ -2,7 +2,10 @@
 # 复制到以下路径并去掉 .example 后缀（或改名为 config）后生效：
 #   Windows: %APPDATA%\ghostling\config
 #   Linux/macOS: ~/.config/ghostling/config
-# 修改后需重启程序。以 # 开头的行为注释。
+# 以 # 开头的行为注释。程序会自动热加载配置，也可用快捷键手动重载。
+
+# 可选：激活某个 profile。也可以通过环境变量 GHOSTLING_PROFILE 指定。
+# profile = work
 
 # ---------------------------------------------------------------------------
 # 终端（PTY）字体
@@ -57,3 +60,19 @@ selection_copy_shortcut = ctrl+c
 #   none（禁用终端级粘贴快捷键）
 # macOS 上会把上述 Ctrl 自动映射为 Command（例如 Command+V）。
 paste_shortcut = ctrl+v
+
+# ---------------------------------------------------------------------------
+# 全局快捷键（支持 primary/ctrl/shift/alt/super + key，none 可禁用）
+# primary 在 macOS=Command，在 Windows/Linux=Ctrl
+# ---------------------------------------------------------------------------
+
+key_new_tab = primary+t
+key_close_tab = primary+w
+key_next_tab = primary+tab
+key_prev_tab = primary+shift+tab
+key_toggle_tab_strip = primary+b
+key_reload_config = primary+shift+r
+
+# profile 覆盖示例（同一文件内定义多套）:
+# profile.work.font_size = 14
+# profile.work.key_next_tab = alt+tab

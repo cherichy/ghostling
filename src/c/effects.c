@@ -65,6 +65,19 @@ void effect_title_changed(GhosttyTerminal terminal, void *userdata)
     ctx->title_shell[len] = '\0';
 }
 
+void effect_sync_pwd(GhosttyTerminal terminal, void *userdata)
+{
+    EffectsContext *ctx = (EffectsContext *)userdata;
+    GhosttyString pwd = {0};
+    if (ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_PWD, &pwd) !=
+        GHOSTTY_SUCCESS)
+        return;
+
+    size_t len = pwd.len < sizeof(ctx->pwd) - 1 ? pwd.len : sizeof(ctx->pwd) - 1;
+    memcpy(ctx->pwd, pwd.ptr, len);
+    ctx->pwd[len] = '\0';
+}
+
 bool effect_color_scheme(GhosttyTerminal terminal, void *userdata,
                          GhosttyColorScheme *out_scheme)
 {

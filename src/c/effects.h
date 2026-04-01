@@ -17,6 +17,8 @@ typedef struct {
     char title_shell[256];
     /** If non-empty, shown in tab bar instead of @ref title_shell (user rename). */
     char title_override[256];
+    /** OSC 7 current working directory (UTF-8). */
+    char pwd[1024];
 } EffectsContext;
 
 void effect_write_pty(GhosttyTerminal terminal, void *userdata,
@@ -27,6 +29,7 @@ bool effect_device_attributes(GhosttyTerminal terminal, void *userdata,
                               GhosttyDeviceAttributes *out_attrs);
 GhosttyString effect_xtversion(GhosttyTerminal terminal, void *userdata);
 void effect_title_changed(GhosttyTerminal terminal, void *userdata);
+void effect_sync_pwd(GhosttyTerminal terminal, void *userdata);
 bool effect_color_scheme(GhosttyTerminal terminal, void *userdata,
                          GhosttyColorScheme *out_scheme);
 

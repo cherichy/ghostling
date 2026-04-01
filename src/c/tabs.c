@@ -195,6 +195,7 @@ bool tab_start_shell(Tab *t, uint16_t cols, uint16_t rows, int cell_width,
     t->effects.rows = rows;
     t->effects.title_shell[0] = '\0';
     t->effects.title_override[0] = '\0';
+    t->effects.pwd[0] = '\0';
 
     tab_bind_ghostty_callbacks(t);
 

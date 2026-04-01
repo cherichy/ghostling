@@ -1,11 +1,18 @@
 #include "terminal_ui.h"
 #include "pty_common.h"
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef _WIN32
+#include <spawn.h>
+#endif
+
+static bool viewport_row_is_soft_wrapped(GhosttyTerminal terminal, uint16_t row);
 
 static bool mouse_debug_enabled(void)
 {
@@ -234,6 +241,170 @@ static bool append_utf8_codepoint(char **buf, size_t *len, size_t *cap,
     return append_bytes(buf, len, cap, u8, (size_t)n);
 }
 
+static bool append_cell_text_to_buffer(GhosttyTerminal terminal, uint16_t x,
+                                       uint16_t y, char **out,
+                                       size_t *out_len, size_t *out_cap)
+{
+    GhosttyPoint point = {
+        .tag = GHOSTTY_POINT_TAG_VIEWPORT,
+        .value = {.coordinate = {.x = x, .y = y}},
+    };
+    GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+    if (ghostty_terminal_grid_ref(terminal, point, &ref) != GHOSTTY_SUCCESS)
+        return false;
+
+    GhosttyCell cell = 0;
+    if (ghostty_grid_ref_cell(&ref, &cell) != GHOSTTY_SUCCESS)
+        return false;
+
+    GhosttyCellWide wide = GHOSTTY_CELL_WIDE_NARROW;
+    if (ghostty_cell_get(cell, GHOSTTY_CELL_DATA_WIDE, &wide) == GHOSTTY_SUCCESS &&
+        (wide == GHOSTTY_CELL_WIDE_SPACER_TAIL ||
+         wide == GHOSTTY_CELL_WIDE_SPACER_HEAD))
+        return false;
+
+    uint32_t cps_inline[16];
+    size_t cp_len = 0;
+    GhosttyResult gr = ghostty_grid_ref_graphemes(
+        &ref, cps_inline, sizeof(cps_inline) / sizeof(cps_inline[0]), &cp_len);
+    if (gr == GHOSTTY_OUT_OF_SPACE && cp_len > 0) {
+        uint32_t *dyn = (uint32_t *)malloc(cp_len * sizeof(uint32_t));
+        if (!dyn)
+            return false;
+        GhosttyResult gr2 = ghostty_grid_ref_graphemes(&ref, dyn, cp_len, &cp_len);
+        if (gr2 == GHOSTTY_SUCCESS) {
+            for (size_t i = 0; i < cp_len; i++) {
+                if (!append_utf8_codepoint(out, out_len, out_cap, dyn[i])) {
+                    free(dyn);
+                    return false;
+                }
+            }
+            free(dyn);
+            return true;
+        }
+        free(dyn);
+        return false;
+    }
+
+    if (gr == GHOSTTY_SUCCESS && cp_len > 0) {
+        for (size_t i = 0; i < cp_len; i++) {
+            if (!append_utf8_codepoint(out, out_len, out_cap, cps_inline[i]))
+                return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+static bool collect_row_text(GhosttyTerminal terminal, uint16_t term_cols,
+                             uint16_t y, char **out, size_t *out_len,
+                             size_t *out_cap)
+{
+    for (uint16_t x = 0; x < term_cols; x++) {
+        if (!append_cell_text_to_buffer(terminal, x, y, out, out_len, out_cap)) {
+            if (!append_bytes(out, out_len, out_cap, " ", 1))
+                return false;
+        }
+    }
+
+    while (*out_len > 0 && (*out)[*out_len - 1] == ' ') {
+        (*out)[--(*out_len)] = '\0';
+    }
+
+    return true;
+}
+
+static bool scan_first_url_in_text(const char *text, char *url_out,
+                                   size_t url_out_sz)
+{
+    const char *scheme = strstr(text, "https://");
+    const char *scheme_http = strstr(text, "http://");
+    if (!scheme || (scheme_http && scheme_http < scheme))
+        scheme = scheme_http;
+    if (!scheme)
+        return false;
+
+    const char *end = scheme;
+    while (*end && !isspace((unsigned char)*end))
+        end++;
+
+    while (end > scheme && strchr(")]}'\".,;:!?", end[-1]) != NULL)
+        end--;
+
+    if (end <= scheme)
+        return false;
+
+    size_t len = (size_t)(end - scheme);
+    if (len >= url_out_sz)
+        len = url_out_sz - 1;
+    memcpy(url_out, scheme, len);
+    url_out[len] = '\0';
+    return len > 0;
+}
+
+bool open_url_at_cell(GhosttyTerminal terminal, uint16_t term_cols,
+                      uint16_t term_rows, uint16_t x, uint16_t y)
+{
+    if (!cell_has_hyperlink(terminal, x, y))
+        return false;
+
+    size_t cap = (size_t)term_cols * 8 + 64;
+    if (cap < 256)
+        cap = 256;
+    char *row_text = (char *)malloc(cap);
+    if (!row_text)
+        return false;
+    size_t row_len = 0;
+    row_text[0] = '\0';
+
+    if (!collect_row_text(terminal, term_cols, y, &row_text, &row_len, &cap)) {
+        free(row_text);
+        return false;
+    }
+
+    if (y + 1 < term_rows && viewport_row_is_soft_wrapped(terminal, y)) {
+        if (!append_bytes(&row_text, &row_len, &cap, " ", 1) ||
+            !collect_row_text(terminal, term_cols, (uint16_t)(y + 1), &row_text,
+                              &row_len, &cap)) {
+            free(row_text);
+            return false;
+        }
+    }
+
+    char url[2048];
+    bool ok = scan_first_url_in_text(row_text, url, sizeof(url));
+    free(row_text);
+    if (!ok)
+        return false;
+
+#if defined(_WIN32)
+    int need = MultiByteToWideChar(CP_UTF8, 0, url, -1, NULL, 0);
+    if (need <= 0)
+        return false;
+    wchar_t *wurl = (wchar_t *)malloc((size_t)need * sizeof(wchar_t));
+    if (!wurl)
+        return false;
+    if (MultiByteToWideChar(CP_UTF8, 0, url, -1, wurl, need) <= 0) {
+        free(wurl);
+        return false;
+    }
+    HINSTANCE res = ShellExecuteW(NULL, L"open", wurl, NULL, NULL, SW_SHOWNORMAL);
+    free(wurl);
+    return (intptr_t)res > 32;
+#elif defined(__APPLE__)
+    extern char **environ;
+    pid_t pid = 0;
+    char *const argv[] = {(char *)"open", (char *)url, NULL};
+    return posix_spawnp(&pid, "open", NULL, NULL, argv, environ) == 0;
+#else
+    extern char **environ;
+    pid_t pid = 0;
+    char *const argv[] = {(char *)"xdg-open", (char *)url, NULL};
+    return posix_spawnp(&pid, "xdg-open", NULL, NULL, argv, environ) == 0;
+#endif
+}
+
 static bool viewport_row_is_soft_wrapped(GhosttyTerminal terminal, uint16_t row)
 {
     GhosttyPoint point = {
@@ -404,6 +575,29 @@ bool paste_host_clipboard_to_terminal(PtyHandle pty_fd, GhosttyTerminal terminal
     }
 
     return true;
+}
+
+bool cell_has_hyperlink(GhosttyTerminal terminal, uint16_t x, uint16_t y)
+{
+    GhosttyPoint point = {
+        .tag = GHOSTTY_POINT_TAG_VIEWPORT,
+        .value = {.coordinate = {.x = x, .y = y}},
+    };
+
+    GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+    if (ghostty_terminal_grid_ref(terminal, point, &ref) != GHOSTTY_SUCCESS)
+        return false;
+
+    GhosttyCell cell = 0;
+    if (ghostty_grid_ref_cell(&ref, &cell) != GHOSTTY_SUCCESS)
+        return false;
+
+    bool has_link = false;
+    if (ghostty_cell_get(cell, GHOSTTY_CELL_DATA_HAS_HYPERLINK, &has_link) !=
+        GHOSTTY_SUCCESS)
+        return false;
+
+    return has_link;
 }
 
 static GhosttyMouseButton raylib_mouse_to_ghostty(int rl_button)
@@ -804,6 +998,13 @@ GhostlingHanTier render_terminal(
                              : (Color){96, 128, 192, 96};
 
     while (ghostty_render_state_row_iterator_next(row_iter)) {
+        GhosttyRow row_raw = 0;
+        GhosttyRowSemanticPrompt row_prompt = GHOSTTY_ROW_SEMANTIC_NONE;
+        if (ghostty_render_state_row_get(row_iter, GHOSTTY_RENDER_STATE_ROW_DATA_RAW,
+                                         &row_raw) == GHOSTTY_SUCCESS)
+            ghostty_row_get(row_raw, GHOSTTY_ROW_DATA_SEMANTIC_PROMPT,
+                            &row_prompt);
+
         if (ghostty_render_state_row_get(row_iter,
                                          GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
                                          &cells) != GHOSTTY_SUCCESS)
@@ -921,6 +1122,14 @@ GhostlingHanTier render_terminal(
                            0,
                            ray_fg);
             }
+        }
+
+        if (row_prompt != GHOSTTY_ROW_SEMANTIC_NONE) {
+            Color marker =
+                (row_prompt == GHOSTTY_ROW_SEMANTIC_PROMPT)
+                    ? (Color){80, 170, 120, 200}
+                    : (Color){80, 140, 170, 180};
+            DrawRectangle(grid_origin_x, y, 2, cell_height, marker);
         }
 
         bool clean = false;

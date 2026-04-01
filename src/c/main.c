@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <stdint.h>
+#include <time.h>
 
 /* raylib before Win32 headers: GDI/User declare names (Rectangle, CloseWindow,
  * ShowCursor) that collide with raylib's API if windows.h is included first. */
@@ -20,8 +21,10 @@
 #define NOUSER
 #endif
 #include <windows.h>
+#include <sys/stat.h>
 #else
 #include <signal.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -33,6 +36,106 @@
 #include "effects.h"
 #include "tabs.h"
 #include "terminal_ui.h"
+
+typedef struct {
+    bool enabled;
+    bool pressed;
+} KeyBindingState;
+
+static bool key_is_down(int key)
+{
+    return IsKeyDown(key);
+}
+
+static bool key_mods_match(uint8_t mods)
+{
+    bool shift = key_is_down(KEY_LEFT_SHIFT) || key_is_down(KEY_RIGHT_SHIFT);
+    bool ctrl = key_is_down(KEY_LEFT_CONTROL) || key_is_down(KEY_RIGHT_CONTROL);
+    bool alt = key_is_down(KEY_LEFT_ALT) || key_is_down(KEY_RIGHT_ALT);
+    bool super = key_is_down(KEY_LEFT_SUPER) || key_is_down(KEY_RIGHT_SUPER);
+
+    bool want_shift = (mods & GHOSTLING_KEYMOD_SHIFT) != 0;
+    bool want_ctrl = (mods & GHOSTLING_KEYMOD_CTRL) != 0;
+    bool want_alt = (mods & GHOSTLING_KEYMOD_ALT) != 0;
+    bool want_super = (mods & GHOSTLING_KEYMOD_SUPER) != 0;
+
+#if defined(__APPLE__)
+    if (mods & GHOSTLING_KEYMOD_PRIMARY)
+        want_super = true;
+#else
+    if (mods & GHOSTLING_KEYMOD_PRIMARY)
+        want_ctrl = true;
+#endif
+
+    return shift == want_shift && ctrl == want_ctrl && alt == want_alt &&
+           super == want_super;
+}
+
+static bool key_binding_pressed(const GhostlingKeyBinding *binding,
+                                KeyBindingState *state)
+{
+    if (!binding->enabled) {
+        state->pressed = false;
+        state->enabled = false;
+        return false;
+    }
+
+    bool key_down = key_is_down(binding->key);
+    bool match = key_down && key_mods_match(binding->mods);
+    bool triggered = match && !state->pressed;
+    state->pressed = match;
+    state->enabled = true;
+    return triggered;
+}
+
+static bool tab_switch_relative(size_t *active, size_t n_tabs, int delta)
+{
+    if (n_tabs == 0 || delta == 0)
+        return false;
+
+    int idx = (int)(*active);
+    int nt = (int)n_tabs;
+    idx = (idx + delta) % nt;
+    if (idx < 0)
+        idx += nt;
+    if ((size_t)idx == *active)
+        return false;
+    *active = (size_t)idx;
+    return true;
+}
+
+static bool file_mtime_seconds(const char *path, time_t *out)
+{
+    if (!path || !path[0])
+        return false;
+
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return false;
+
+    *out = st.st_mtime;
+    return true;
+}
+
+static void update_terminal_metadata(Tab *tab, char *window_title,
+                                     size_t window_title_sz)
+{
+    effect_sync_pwd(tab->terminal, &tab->effects);
+
+    char tab_title[256] = {0};
+    tab_display_title(tab, 1, tab_title, sizeof(tab_title));
+    if (tab_title[0] != '\0') {
+        snprintf(window_title, window_title_sz, "%s", tab_title);
+        return;
+    }
+
+    if (tab->effects.pwd[0] != '\0') {
+        snprintf(window_title, window_title_sz, "%s", tab->effects.pwd);
+        return;
+    }
+
+    snprintf(window_title, window_title_sz, "%s", "ghostling");
+}
 
 static void raylib_trace_filter_callback(int log_level, const char *text,
                                          va_list args)
@@ -447,6 +550,16 @@ int main(int argc, char *argv[])
     char edit_buf[256];
 
     bool splitter_dragging = false;
+    bool pending_config_reload = false;
+    KeyBindingState key_new_tab_state = {0};
+    KeyBindingState key_close_tab_state = {0};
+    KeyBindingState key_next_tab_state = {0};
+    KeyBindingState key_prev_tab_state = {0};
+    KeyBindingState key_toggle_tab_strip_state = {0};
+    KeyBindingState key_reload_config_state = {0};
+    time_t loaded_config_mtime = 0;
+    bool has_loaded_config_mtime =
+        file_mtime_seconds(app_cfg.loaded_config_path, &loaded_config_mtime);
 
     GhosttyKeyEncoder key_encoder = NULL;
     GhosttyKeyEvent key_event = NULL;
@@ -522,6 +635,18 @@ int main(int argc, char *argv[])
         scr_h = GetScreenHeight();
         render_w = GetRenderWidth();
         render_h = GetRenderHeight();
+
+        if (!pending_config_reload && app_cfg.loaded_config_path[0]) {
+            time_t now_mtime = 0;
+            bool has_now =
+                file_mtime_seconds(app_cfg.loaded_config_path, &now_mtime);
+            if (has_now && (!has_loaded_config_mtime ||
+                            now_mtime != loaded_config_mtime)) {
+                pending_config_reload = true;
+                frame_activity = true;
+            }
+        }
+
         ui_w = scr_w;
         ui_h = scr_h;
         /* Prefer render size mapped back to logical coords; avoids oversized scr_h on maximize. */
@@ -629,6 +754,53 @@ int main(int argc, char *argv[])
         }
 
         Tab *cur = tab_list[active];
+
+        if (key_binding_pressed(&app_cfg.key_reload_config,
+                                &key_reload_config_state)) {
+            pending_config_reload = true;
+            frame_activity = true;
+        }
+
+        if (edit_tab == TAB_EDIT_NONE) {
+            if (key_binding_pressed(&app_cfg.key_toggle_tab_strip,
+                                    &key_toggle_tab_strip_state)) {
+                tab_strip_collapsed = !tab_strip_collapsed;
+                apply_strip_resize(ui_w, ui_h, &tab_strip_w, tab_strip_collapsed,
+                                   cell_width, cell_height, pad, &term_cols,
+                                   &term_rows, &grid_origin_x, &grid_origin_y,
+                                   tab_list, n_tabs);
+                frame_activity = true;
+            }
+
+            if (key_binding_pressed(&app_cfg.key_next_tab, &key_next_tab_state) &&
+                tab_switch_relative(&active, n_tabs, +1))
+                frame_activity = true;
+
+            if (key_binding_pressed(&app_cfg.key_prev_tab, &key_prev_tab_state) &&
+                tab_switch_relative(&active, n_tabs, -1))
+                frame_activity = true;
+
+            if (key_binding_pressed(&app_cfg.key_new_tab, &key_new_tab_state) &&
+                n_tabs < MAX_TABS) {
+                Tab *nt = malloc(sizeof(Tab));
+                if (nt && tab_start_shell(nt, term_cols, term_rows, cell_width,
+                                          cell_height, shell_override)) {
+                    tab_list[n_tabs] = nt;
+                    active = n_tabs;
+                    n_tabs++;
+                    frame_activity = true;
+                } else if (nt) {
+                    free(nt);
+                }
+            }
+
+            if (key_binding_pressed(&app_cfg.key_close_tab,
+                                    &key_close_tab_state) &&
+                n_tabs > 1) {
+                close_tab_at(tab_list, &n_tabs, &active, active);
+                frame_activity = true;
+            }
+        }
 
         Vector2 mpos = GetMousePosition();
         if (mpos.x != prev_mouse_pos.x || mpos.y != prev_mouse_pos.y)
@@ -779,7 +951,29 @@ int main(int argc, char *argv[])
             ghostty_terminal_get(cur->terminal, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING,
                                  &mouse_tracking);
 
-            if (!mouse_tracking && !scrollbar_consumed) {
+            bool hyperlink_clicked = false;
+
+            if (mouse_in_terminal) {
+                uint16_t hover_x = 0;
+                uint16_t hover_y = 0;
+                mouse_to_cell_clamped(mpos, grid_origin_x, grid_origin_y,
+                                      term_pixel_w, term_pixel_h, cell_width,
+                                      cell_height, term_cols, term_rows,
+                                      &hover_x, &hover_y);
+                if (cell_has_hyperlink(cur->terminal, hover_x, hover_y))
+                    SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+                    shortcut_primary_modifier_down()) {
+                    if (open_url_at_cell(cur->terminal, term_cols, term_rows,
+                                         hover_x, hover_y)) {
+                        hyperlink_clicked = true;
+                        frame_activity = true;
+                    }
+                }
+            }
+
+            if (!hyperlink_clicked && !mouse_tracking && !scrollbar_consumed) {
                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                     if (mouse_in_terminal &&
                         !(tab_strip_collapsed &&
@@ -871,7 +1065,8 @@ int main(int argc, char *argv[])
             if (mouse_pad_bottom < 0)
                 mouse_pad_bottom = 0;
 
-            if (focused && !scrollbar_consumed && mouse_in_terminal &&
+            if (focused && !hyperlink_clicked && !scrollbar_consumed &&
+                mouse_in_terminal &&
                 !(tab_strip_collapsed &&
                   tab_splitter_toggle_hit(mpos, 0, ui_h)))
                 if (handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
@@ -890,9 +1085,7 @@ int main(int argc, char *argv[])
             frame_activity = true;
 
         char wtitle[280];
-        char disp[256];
-        tab_display_title(cur, active + 1, disp, sizeof(disp));
-        snprintf(wtitle, sizeof(wtitle), "%s", disp[0] != '\0' ? disp : "ghostling");
+        update_terminal_metadata(cur, wtitle, sizeof(wtitle));
         if (strcmp(window_title_cache, wtitle) != 0) {
             SetWindowTitle(wtitle);
             snprintf(window_title_cache, sizeof(window_title_cache), "%s",
@@ -993,6 +1186,48 @@ int main(int argc, char *argv[])
         }
 
         EndDrawing();
+
+        if (pending_config_reload) {
+            AppConfig loaded;
+            config_load_profile(&loaded, app_cfg.profile);
+
+            bool key_reload_disabled = false;
+            if (!loaded.key_reload_config.enabled)
+                key_reload_disabled = true;
+
+            bool font_set_changed =
+                strcmp(loaded.font_codepoint_set, app_cfg.font_codepoint_set) != 0;
+            bool font_path_changed = strcmp(loaded.font_path, app_cfg.font_path) != 0;
+            bool font_size_changed = loaded.font_size != app_cfg.font_size;
+
+            app_cfg = loaded;
+            font_size = app_cfg.font_size;
+            has_loaded_config_mtime =
+                file_mtime_seconds(app_cfg.loaded_config_path,
+                                  &loaded_config_mtime);
+
+            if (font_set_changed || font_path_changed || font_size_changed) {
+                if (reload_terminal_font(&mono_font, &app_cfg, dpi_scale,
+                                         &font_size_px, &cell_width,
+                                         &cell_height)) {
+                    current_han_tier = ghostling_han_tier_from_codepoint_set(
+                        app_cfg.font_codepoint_set);
+                    clamp_tab_strip_w(ui_w, cell_width, pad, &tab_strip_w);
+                    layout_terms(ui_w, ui_h,
+                                 tab_strip_layout_w(tab_strip_collapsed,
+                                                    tab_strip_w),
+                                 cell_width, cell_height, pad, &term_cols,
+                                 &term_rows, &grid_origin_x, &grid_origin_y);
+                    for (size_t i = 0; i < n_tabs; i++)
+                        tab_resize_pty(tab_list[i], term_cols, term_rows,
+                                       cell_width, cell_height);
+                }
+            }
+
+            if (key_reload_disabled)
+                key_reload_config_state.pressed = false;
+            pending_config_reload = false;
+        }
 
         if (current_han_tier != GHOSTLING_HAN_TIER_NONE &&
             missing_han_tier > current_han_tier) {

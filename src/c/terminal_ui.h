@@ -25,6 +25,9 @@ bool copy_viewport_selection_to_clipboard(GhosttyTerminal terminal,
                                           uint16_t sel_x1,
                                           uint16_t sel_y1);
 bool paste_host_clipboard_to_terminal(PtyHandle pty_fd, GhosttyTerminal terminal);
+bool cell_has_hyperlink(GhosttyTerminal terminal, uint16_t x, uint16_t y);
+bool open_url_at_cell(GhosttyTerminal terminal, uint16_t term_cols,
+                      uint16_t term_rows, uint16_t x, uint16_t y);
 /** @param font_size Logical point size for DrawTextEx (matches config); atlas is
  *  loaded larger on HiDPI — must stay logical here or cells and glyphs misalign. */
 GhostlingHanTier render_terminal(
