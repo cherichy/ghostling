@@ -159,6 +159,9 @@ int main(int argc, char *argv[])
     SetConfigFlags(FLAG_WINDOW_HIGHDPI);
 
     InitWindow(800, 600, "ghostling");
+    /* Do not let raylib treat Escape as "close window".
+     * Escape must be delivered to the PTY/app running in the terminal. */
+    SetExitKey(KEY_NULL);
     SetWindowState(FLAG_WINDOW_RESIZABLE);
     const int fps_active = 60;
     const int fps_idle = 8;
@@ -195,11 +198,14 @@ int main(int argc, char *argv[])
             app_cfg.font_codepoint_set, cp_count, mono_font.texture.width,
             mono_font.texture.height, (double)atlas_bytes / (1024.0 * 1024.0));
 
-    SetTextureFilter(mono_font.texture, TEXTURE_FILTER_BILINEAR);
+    /* Terminal grids are sensitive to 1px color bleed at glyph edges
+     * (Powerline separators, box-drawing). Point sampling avoids atlas
+     * interpolation artifacts between neighboring glyph texels. */
+    SetTextureFilter(mono_font.texture, TEXTURE_FILTER_POINT);
 
     Vector2 glyph_size = MeasureTextEx(mono_font, "M", (float)font_size_px, 0);
-    int cell_width = (int)(glyph_size.x / dpi_scale.x);
-    int cell_height = (int)(glyph_size.y / dpi_scale.y);
+    int cell_width = (int)((glyph_size.x / dpi_scale.x) + 0.5f);
+    int cell_height = (int)((glyph_size.y / dpi_scale.y) + 0.5f);
     if (cell_width < 1)
         cell_width = 1;
     if (cell_height < 1)
@@ -586,12 +592,27 @@ int main(int argc, char *argv[])
             if (handle_input(tab_pty_write(cur), key_encoder, key_event,
                              cur->terminal))
                 frame_activity = true;
-            if (!scrollbar_consumed && mpos.x >= (float)grid_origin_x &&
+
+            int term_pixel_w = (int)term_cols * cell_width;
+            int term_pixel_h = (int)term_rows * cell_height;
+            int mouse_pad_right = ui_w - grid_origin_x - term_pixel_w;
+            int mouse_pad_bottom = ui_h - grid_origin_y - term_pixel_h;
+            if (mouse_pad_right < 0)
+                mouse_pad_right = 0;
+            if (mouse_pad_bottom < 0)
+                mouse_pad_bottom = 0;
+
+            if (focused && !scrollbar_consumed && mpos.x >= (float)grid_origin_x &&
+                mpos.y >= (float)grid_origin_y &&
+                mpos.x < (float)(grid_origin_x + term_pixel_w) &&
+                mpos.y < (float)(grid_origin_y + term_pixel_h) &&
                 !(tab_strip_collapsed &&
                   tab_splitter_toggle_hit(mpos, 0, ui_h)))
                 if (handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
                                  cur->terminal, cell_width, cell_height,
-                                 grid_origin_x, pad, pad, pad))
+                                 grid_origin_x, grid_origin_y,
+                                 mouse_pad_right, mouse_pad_bottom, ui_w,
+                                 ui_h))
                     frame_activity = true;
         }
 

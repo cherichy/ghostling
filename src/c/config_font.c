@@ -4,6 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
+
 /** Bundled Maple Mono NF CN (copied into repo `fonts/`). */
 #define GHOSTLING_DEFAULT_FONT_PATH "fonts/MapleMono-NF-CN-Regular.ttf"
 
@@ -28,6 +34,84 @@ static bool file_is_readable(const char *path)
         return false;
     fclose(f);
     return true;
+}
+
+static bool path_is_absolute(const char *path)
+{
+    if (!path || !path[0])
+        return false;
+#ifdef _WIN32
+    if (isalpha((unsigned char)path[0]) && path[1] == ':' &&
+        (path[2] == '\\' || path[2] == '/'))
+        return true;
+    if ((path[0] == '\\' && path[1] == '\\') || path[0] == '\\' ||
+        path[0] == '/')
+        return true;
+    return false;
+#else
+    return path[0] == '/';
+#endif
+}
+
+static bool current_working_dir(char *out, size_t out_sz)
+{
+#ifdef _WIN32
+    return _getcwd(out, (int)out_sz) != NULL;
+#else
+    return getcwd(out, out_sz) != NULL;
+#endif
+}
+
+static bool try_relative_candidates(const char *base_dir, const char *rel_path,
+                                    char *out, size_t out_sz)
+{
+    static const char *prefixes[] = {
+        "",
+        "..",
+        "../..",
+        "../../..",
+    };
+
+    for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        char candidate[4096];
+        int n = 0;
+        if (prefixes[i][0])
+            n = snprintf(candidate, sizeof(candidate), "%s/%s/%s", base_dir,
+                         prefixes[i], rel_path);
+        else
+            n = snprintf(candidate, sizeof(candidate), "%s/%s", base_dir,
+                         rel_path);
+        if (n <= 0 || (size_t)n >= sizeof(candidate))
+            continue;
+        if (!file_is_readable(candidate))
+            continue;
+        snprintf(out, out_sz, "%s", candidate);
+        return true;
+    }
+
+    return false;
+}
+
+static bool resolve_readable_font_path(const char *path, char *out,
+                                       size_t out_sz)
+{
+    if (!path || !path[0])
+        return false;
+
+    if (file_is_readable(path)) {
+        snprintf(out, out_sz, "%s", path);
+        return true;
+    }
+
+    if (path_is_absolute(path))
+        return false;
+
+    char cwd[4096];
+    if (current_working_dir(cwd, sizeof(cwd)) &&
+        try_relative_candidates(cwd, path, out, out_sz))
+        return true;
+
+    return false;
 }
 
 static bool config_default_path(char *out, size_t out_sz)
@@ -156,7 +240,7 @@ static bool append_range(int *buf, int *n, int cap, int lo, int hi)
 
 int *build_terminal_codepoints(const char *set_name, int *out_count)
 {
-    const int cap = 32768;
+    const int cap = 65536;
     int *cp = (int *)malloc((size_t)cap * sizeof(int));
     if (!cp)
         return NULL;
@@ -189,6 +273,9 @@ int *build_terminal_codepoints(const char *set_name, int *out_count)
     R(0x25A0, 0x25FF);
     R(0x2600, 0x26FF);
     R(0x2700, 0x27BF);
+    /* zellij/tmux powerline separators (for example U+E0B0) live in PUA.
+     * Keep this narrow to avoid a large atlas jump from loading all PUA codepoints. */
+    R(0xE0A0, 0xE0D7);
 
     if (strcmp(set, "latin") != 0) {
         /* Compact/full keep CJK core blocks for Chinese/Japanese/Korean text. */
@@ -196,6 +283,18 @@ int *build_terminal_codepoints(const char *set_name, int *out_count)
         R(0x31F0, 0x31FF);
         R(0x4E00, 0x9FFF);
         R(0xFF00, 0xFFEF);
+
+        /* Common Nerd Font icon blocks used by prompts/TUI statuslines.
+         * Keep these in compact/full so NF glyphs render without forcing
+         * the full supplementary-plane icon set. */
+        R(0xE000, 0xE00A);
+        R(0xE200, 0xE2A9);
+        R(0xE300, 0xE3E3);
+        R(0xE5FA, 0xE6B8);
+        R(0xE700, 0xE8EF);
+        R(0xEA60, 0xEC1E);
+        R(0xED00, 0xEFCE);
+        R(0xF000, 0xF533);
     }
 
     if (strcmp(set, "full") == 0) {
@@ -203,8 +302,12 @@ int *build_terminal_codepoints(const char *set_name, int *out_count)
         R(0x3200, 0x32FF);
         R(0x3300, 0x33FF);
         R(0x3400, 0x4DBF);
+        R(0xFE00, 0xFE0F);
         R(0xFE10, 0xFE1F);
         R(0xFE30, 0xFE4F);
+
+        /* Supplementary-plane Nerd Font glyphs (material/icon extras). */
+        R(0xF0001, 0xF1AF0);
     }
 #undef R
 
@@ -216,18 +319,23 @@ Font load_terminal_font(const char *path, const unsigned char *embed,
                         int embed_size, int font_size_px, int *codepoints,
                         int cp_count)
 {
-    if (path && path[0] && file_is_readable(path)) {
-        Font f = LoadFontEx(path, font_size_px, codepoints, cp_count);
+    char resolved_path[4096];
+    if (path && path[0] &&
+        resolve_readable_font_path(path, resolved_path, sizeof(resolved_path))) {
+        Font f = LoadFontEx(resolved_path, font_size_px, codepoints, cp_count);
+        if (f.glyphCount > 0 && f.texture.id > 0)
+            fprintf(stderr, "ghostling: using font \"%s\"\n", resolved_path);
         if (f.glyphCount > 0 && f.texture.id > 0)
             return f;
         fprintf(stderr,
                 "ghostling: LoadFontEx failed for \"%s\", using embedded font\n",
-                path);
+                resolved_path);
     } else if (path && path[0]) {
         fprintf(stderr, "ghostling: font not readable \"%s\", using embedded font\n",
                 path);
     }
 
+    fprintf(stderr, "ghostling: using embedded fallback font\n");
     return LoadFontFromMemory(".ttf", embed, embed_size, font_size_px,
                               codepoints, cp_count);
 }

@@ -3,7 +3,55 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+static bool mouse_debug_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = getenv("GHOSTLING_DEBUG_MOUSE");
+        cached = (v && v[0] && strcmp(v, "0") != 0) ? 1 : 0;
+        if (cached)
+            fprintf(stderr,
+                    "ghostling: mouse debug logging enabled (GHOSTLING_DEBUG_MOUSE)\n");
+    }
+    return cached == 1;
+}
+
+static void mouse_debug_log_encode(GhosttyMouseEvent event, GhosttyResult res,
+                                   const char *buf, size_t written)
+{
+    if (!mouse_debug_enabled())
+        return;
+
+    GhosttyMouseAction action = ghostty_mouse_event_get_action(event);
+    GhosttyMouseButton button = GHOSTTY_MOUSE_BUTTON_UNKNOWN;
+    bool has_button = ghostty_mouse_event_get_button(event, &button);
+    GhosttyMods mods = ghostty_mouse_event_get_mods(event);
+    GhosttyMousePosition pos = ghostty_mouse_event_get_position(event);
+
+    fprintf(stderr,
+            "ghostling: mouse encode action=%d button=%s%d mods=0x%X "
+            "pos=(%.1f,%.1f) res=%d written=%zu seq=\"",
+            (int)action, has_button ? "" : "none/", (int)button,
+            (unsigned)mods, pos.x, pos.y, (int)res, written);
+
+    for (size_t i = 0; i < written; i++) {
+        unsigned char c = (unsigned char)buf[i];
+        if (c == '\\')
+            fputs("\\\\", stderr);
+        else if (c == 0x1B)
+            fputs("\\x1b", stderr);
+        else if (c >= 0x20 && c <= 0x7E)
+            fputc((int)c, stderr);
+        else
+            fprintf(stderr, "\\x%02X", c);
+    }
+
+    fputs("\"\n", stderr);
+}
 
 static GhosttyKey raylib_key_to_ghostty(int rl_key)
 {
@@ -177,27 +225,34 @@ static GhosttyMouseButton raylib_mouse_to_ghostty(int rl_button)
     }
 }
 
-static void mouse_encode_and_write(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
+static bool mouse_encode_and_write(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
                                    GhosttyMouseEvent event)
 {
     char buf[128];
     size_t written = 0;
     GhosttyResult res = ghostty_mouse_encoder_encode(
         encoder, event, buf, sizeof(buf), &written);
-    if (res == GHOSTTY_SUCCESS && written > 0)
+
+    mouse_debug_log_encode(event, res, buf, written);
+
+    if (res == GHOSTTY_SUCCESS && written > 0) {
         pty_write(pty_fd, buf, written);
+        return true;
+    }
+    return false;
 }
 
 bool handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
                   GhosttyMouseEvent event, GhosttyTerminal terminal,
                   int cell_width, int cell_height, int pad_left, int pad_top,
-                  int pad_right, int pad_bottom)
+                  int pad_right, int pad_bottom, int screen_width,
+                  int screen_height)
 {
     bool had_event = false;
     ghostty_mouse_encoder_setopt_from_terminal(encoder, terminal);
 
-    int scr_w = GetScreenWidth();
-    int scr_h = GetScreenHeight();
+    int scr_w = (screen_width > 0) ? screen_width : GetScreenWidth();
+    int scr_h = (screen_height > 0) ? screen_height : GetScreenHeight();
     GhosttyMouseEncoderSize enc_size = {
         .size = sizeof(GhosttyMouseEncoderSize),
         .screen_width = (uint32_t)scr_w,
@@ -228,10 +283,32 @@ bool handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
     ghostty_mouse_event_set_position(
         event, (GhosttyMousePosition){.x = pos.x, .y = pos.y});
 
+    static float wheel_accum = 0.0f;
+    static int wheel_backlog = 0;
+    wheel_accum += GetMouseWheelMove();
+
+    int wheel_steps = 0;
+    while (wheel_accum >= 1.0f) {
+        wheel_steps++;
+        wheel_accum -= 1.0f;
+    }
+    while (wheel_accum <= -1.0f) {
+        wheel_steps--;
+        wheel_accum += 1.0f;
+    }
+
+    if (wheel_steps != 0) {
+        wheel_backlog += wheel_steps;
+        if (wheel_backlog > 64)
+            wheel_backlog = 64;
+        else if (wheel_backlog < -64)
+            wheel_backlog = -64;
+    }
+
     static const int buttons[] = {
-        MOUSE_BUTTON_LEFT,   MOUSE_BUTTON_RIGHT,  MOUSE_BUTTON_MIDDLE,
-        MOUSE_BUTTON_SIDE,   MOUSE_BUTTON_EXTRA,  MOUSE_BUTTON_FORWARD,
-        MOUSE_BUTTON_BACK,
+        MOUSE_BUTTON_LEFT,
+        MOUSE_BUTTON_RIGHT,
+        MOUSE_BUTTON_MIDDLE,
     };
     for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i++) {
         int rl_btn = buttons[i];
@@ -253,7 +330,7 @@ bool handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
     }
 
     Vector2 delta = GetMouseDelta();
-    if (delta.x != 0.0f || delta.y != 0.0f) {
+    if (wheel_backlog == 0 && (delta.x != 0.0f || delta.y != 0.0f)) {
         ghostty_mouse_event_set_action(event, GHOSTTY_MOUSE_ACTION_MOTION);
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT))
             ghostty_mouse_event_set_button(event, GHOSTTY_MOUSE_BUTTON_LEFT);
@@ -267,29 +344,46 @@ bool handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
         had_event = true;
     }
 
-    float wheel = GetMouseWheelMove();
-    if (wheel != 0.0f) {
+    if (wheel_backlog != 0) {
         bool mouse_tracking = false;
         ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING,
                              &mouse_tracking);
 
-        if (mouse_tracking) {
-            GhosttyMouseButton scroll_btn = (wheel > 0.0f)
-                                                ? GHOSTTY_MOUSE_BUTTON_FOUR
-                                                : GHOSTTY_MOUSE_BUTTON_FIVE;
-            ghostty_mouse_event_set_button(event, scroll_btn);
-            ghostty_mouse_event_set_action(event, GHOSTTY_MOUSE_ACTION_PRESS);
-            mouse_encode_and_write(pty_fd, encoder, event);
-            ghostty_mouse_event_set_action(event, GHOSTTY_MOUSE_ACTION_RELEASE);
-            mouse_encode_and_write(pty_fd, encoder, event);
-        } else {
-            int scroll_delta = (wheel > 0.0f) ? -3 : 3;
+        int dispatch_steps = wheel_backlog;
+        /* Avoid large one-frame wheel bursts while mouse reporting is active.
+         * Raylib can accumulate many wheel ticks between frames at low FPS,
+         * which can overwhelm TUI parsers and leak raw tails. */
+        if (mouse_tracking)
+            dispatch_steps = (wheel_backlog > 0) ? 1 : -1;
+
+        if (mouse_debug_enabled())
+            fprintf(stderr,
+                    "ghostling: mouse wheel backlog=%d dispatch=%d tracking=%d\n",
+                    wheel_backlog, dispatch_steps, mouse_tracking ? 1 : 0);
+
+        /* Wheel events are press-only in terminal mouse protocols.
+         * Sending an extra release produces spurious `...m` sequences. */
+        GhosttyMouseButton scroll_btn =
+            (dispatch_steps > 0) ? GHOSTTY_MOUSE_BUTTON_FOUR
+                              : GHOSTTY_MOUSE_BUTTON_FIVE;
+        int repeats = (dispatch_steps > 0) ? dispatch_steps : -dispatch_steps;
+        bool sent_to_pty = false;
+        ghostty_mouse_event_set_button(event, scroll_btn);
+        ghostty_mouse_event_set_action(event, GHOSTTY_MOUSE_ACTION_PRESS);
+        for (int i = 0; i < repeats; i++)
+            sent_to_pty = mouse_encode_and_write(pty_fd, encoder, event) ||
+                          sent_to_pty;
+
+        if (!sent_to_pty && !mouse_tracking) {
+            int scroll_delta = -3 * dispatch_steps;
             GhosttyTerminalScrollViewport sv = {
                 .tag = GHOSTTY_SCROLL_VIEWPORT_DELTA,
                 .value = {.delta = scroll_delta},
             };
             ghostty_terminal_scroll_viewport(terminal, sv);
         }
+
+        wheel_backlog -= dispatch_steps;
         had_event = true;
     }
 
@@ -480,26 +574,50 @@ void render_terminal(GhosttyRenderState render_state,
                                          &cells) != GHOSTTY_SUCCESS)
             continue;
 
+        int cols_in_row = 0;
         int x = grid_origin_x;
 
+        /* Draw the row in two passes: backgrounds first, then glyphs.
+         * This prevents a neighboring cell's background from erasing
+         * overhang pixels of Powerline separators (for example U+E0B0). */
         while (ghostty_render_state_row_cells_next(cells)) {
+            GhosttyColorRgb bg_rgb = colors.background;
+            bool has_bg = ghostty_render_state_row_cells_get(
+                              cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
+                              &bg_rgb) == GHOSTTY_SUCCESS;
+
+            GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
+            ghostty_render_state_row_cells_get(
+                cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &style);
+
+            if (style.inverse) {
+                GhosttyColorRgb fg = colors.foreground;
+                ghostty_render_state_row_cells_get(
+                    cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &fg);
+                bg_rgb = fg;
+                has_bg = true;
+            }
+
+            if (has_bg) {
+                DrawRectangle(x, y, cell_width, cell_height,
+                              (Color){bg_rgb.r, bg_rgb.g, bg_rgb.b, 255});
+            }
+
+            x += cell_width;
+            cols_in_row++;
+        }
+
+        for (int col = 0; col < cols_in_row; col++) {
+            if (ghostty_render_state_row_cells_select(cells, (uint16_t)col) !=
+                GHOSTTY_SUCCESS)
+                continue;
+
             uint32_t grapheme_len = 0;
             ghostty_render_state_row_cells_get(
                 cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN,
                 &grapheme_len);
-
-            if (grapheme_len == 0) {
-                GhosttyColorRgb bg = {0};
-                if (ghostty_render_state_row_cells_get(
-                        cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
-                        &bg) == GHOSTTY_SUCCESS) {
-                    DrawRectangle(x, y, cell_width, cell_height,
-                                  (Color){bg.r, bg.g, bg.b, 255});
-                }
-
-                x += cell_width;
+            if (grapheme_len == 0)
                 continue;
-            }
 
             uint32_t codepoints[16];
             uint32_t len = grapheme_len < 16 ? grapheme_len : 16;
@@ -522,9 +640,8 @@ void render_terminal(GhosttyRenderState render_state,
                 cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, &fg);
 
             GhosttyColorRgb bg_rgb = colors.background;
-            bool has_bg = ghostty_render_state_row_cells_get(
-                              cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
-                              &bg_rgb) == GHOSTTY_SUCCESS;
+            ghostty_render_state_row_cells_get(
+                cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &bg_rgb);
 
             GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
             ghostty_render_state_row_cells_get(
@@ -534,28 +651,28 @@ void render_terminal(GhosttyRenderState render_state,
                 GhosttyColorRgb tmp = fg;
                 fg = bg_rgb;
                 bg_rgb = tmp;
-                has_bg = true;
             }
 
             Color ray_fg = {fg.r, fg.g, fg.b, 255};
-
-            if (has_bg) {
-                DrawRectangle(x, y, cell_width, cell_height,
-                              (Color){bg_rgb.r, bg_rgb.g, bg_rgb.b, 255});
-            }
-
             int italic_offset = style.italic ? (font_size / 6) : 0;
+            int draw_x = grid_origin_x + col * cell_width;
 
-            DrawTextEx(font, text, (Vector2){(float)(x + italic_offset), (float)y},
-                       (float)font_size, 0, ray_fg);
+            DrawTextEx(font,
+                       text,
+                       (Vector2){(float)(draw_x + italic_offset), (float)y},
+                       (float)font_size,
+                       0,
+                       ray_fg);
 
             if (style.bold) {
-                DrawTextEx(font, text,
-                           (Vector2){(float)(x + italic_offset + 1), (float)y},
-                           (float)font_size, 0, ray_fg);
+                DrawTextEx(font,
+                           text,
+                           (Vector2){(float)(draw_x + italic_offset + 1),
+                                     (float)y},
+                           (float)font_size,
+                           0,
+                           ray_fg);
             }
-
-            x += cell_width;
         }
 
         bool clean = false;

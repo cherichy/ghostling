@@ -16,9 +16,9 @@
 font_size = 16
 
 # 字形集合（影响启动耗时和内存）：
-#   full    = 完整集合（默认，兼容旧行为，约 31k codepoints）
-#   compact = 常用 CJK + 全角 + 基础符号（约 24k codepoints）
-#   latin   = 拉丁/符号/框线（不含 CJK，约 4k codepoints）
+#   full    = 完整集合（默认，含 CJK + Nerd 扩展图标，约 42k codepoints）
+#   compact = 常用 CJK + 全角 + 常见 Nerd 图标，约 28k codepoints
+#   latin   = 拉丁/符号/框线 + powerline 分隔符（不含 CJK，约 2.4k codepoints）
 font_codepoint_set = full
 
 # ---------------------------------------------------------------------------

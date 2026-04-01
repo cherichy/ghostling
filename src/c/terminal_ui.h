@@ -9,7 +9,8 @@ void log_build_info(void);
 bool handle_mouse(PtyHandle pty_fd, GhosttyMouseEncoder encoder,
                   GhosttyMouseEvent event, GhosttyTerminal terminal,
                   int cell_width, int cell_height, int pad_left, int pad_top,
-                  int pad_right, int pad_bottom);
+                  int pad_right, int pad_bottom, int screen_width,
+                  int screen_height);
 bool handle_input(PtyHandle pty_fd, GhosttyKeyEncoder encoder,
                   GhosttyKeyEvent event, GhosttyTerminal terminal);
 bool handle_scrollbar(GhosttyTerminal terminal, GhosttyRenderState render_state,
