@@ -51,6 +51,14 @@ typedef struct Tab {
     bool child_exited;
     bool child_reaped;
     int child_exit_status;
+
+    /* Local mouse-selection state used for host-side clipboard copy. */
+    bool selection_active;
+    bool selection_dragging;
+    uint16_t selection_anchor_x;
+    uint16_t selection_anchor_y;
+    uint16_t selection_focus_x;
+    uint16_t selection_focus_y;
 } Tab;
 
 typedef enum {

@@ -147,6 +147,87 @@ static bool codepoint_set_valid(const char *set_name)
            strcmp(set_name, "latin") == 0;
 }
 
+static bool parse_bool_value(const char *val, bool *out)
+{
+    char lowered[32];
+    ascii_lower_copy(lowered, sizeof(lowered), val);
+    if (strcmp(lowered, "1") == 0 || strcmp(lowered, "true") == 0 ||
+        strcmp(lowered, "yes") == 0 || strcmp(lowered, "on") == 0) {
+        *out = true;
+        return true;
+    }
+    if (strcmp(lowered, "0") == 0 || strcmp(lowered, "false") == 0 ||
+        strcmp(lowered, "no") == 0 || strcmp(lowered, "off") == 0) {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_copy_shortcut(const char *val, GhostlingCopyShortcut *out)
+{
+    char compact[64];
+    size_t n = 0;
+    for (size_t i = 0; val[i] != '\0' && n + 1 < sizeof(compact); i++) {
+        unsigned char c = (unsigned char)val[i];
+        if (isspace(c))
+            continue;
+        compact[n++] = (char)tolower(c);
+    }
+    compact[n] = '\0';
+
+    if (strcmp(compact, "ctrl+c") == 0 || strcmp(compact, "ctrl-c") == 0 ||
+        strcmp(compact, "ctrl_c") == 0) {
+        *out = GHOSTLING_COPY_SHORTCUT_CTRL_C;
+        return true;
+    }
+
+    if (strcmp(compact, "ctrl+shift+c") == 0 ||
+        strcmp(compact, "ctrl+shift-c") == 0 ||
+        strcmp(compact, "ctrl-shift-c") == 0 ||
+        strcmp(compact, "ctrl_shift_c") == 0) {
+        *out = GHOSTLING_COPY_SHORTCUT_CTRL_SHIFT_C;
+        return true;
+    }
+
+    return false;
+}
+
+static bool parse_paste_shortcut(const char *val, GhostlingPasteShortcut *out)
+{
+    char compact[64];
+    size_t n = 0;
+    for (size_t i = 0; val[i] != '\0' && n + 1 < sizeof(compact); i++) {
+        unsigned char c = (unsigned char)val[i];
+        if (isspace(c))
+            continue;
+        compact[n++] = (char)tolower(c);
+    }
+    compact[n] = '\0';
+
+    if (strcmp(compact, "ctrl+shift+v") == 0 ||
+        strcmp(compact, "ctrl+shift-v") == 0 ||
+        strcmp(compact, "ctrl-shift-v") == 0 ||
+        strcmp(compact, "ctrl_shift_v") == 0) {
+        *out = GHOSTLING_PASTE_SHORTCUT_CTRL_SHIFT_V;
+        return true;
+    }
+
+    if (strcmp(compact, "ctrl+v") == 0 || strcmp(compact, "ctrl-v") == 0 ||
+        strcmp(compact, "ctrl_v") == 0) {
+        *out = GHOSTLING_PASTE_SHORTCUT_CTRL_V;
+        return true;
+    }
+
+    if (strcmp(compact, "none") == 0 || strcmp(compact, "disabled") == 0 ||
+        strcmp(compact, "off") == 0) {
+        *out = GHOSTLING_PASTE_SHORTCUT_NONE;
+        return true;
+    }
+
+    return false;
+}
+
 static void config_load_file(const char *path, AppConfig *cfg)
 {
     FILE *f = fopen(path, "rb");
@@ -200,6 +281,19 @@ static void config_load_file(const char *path, AppConfig *cfg)
             long n = strtol(val, &end, 10);
             if (end != val && n >= 8 && n <= 128)
                 cfg->tab_reserved_h = (int)n;
+        } else if (strcmp(key, "selection_copy_on_select") == 0) {
+            bool b = false;
+            if (parse_bool_value(val, &b))
+                cfg->selection_copy_on_select = b;
+        } else if (strcmp(key, "selection_copy_shortcut") == 0) {
+            GhostlingCopyShortcut shortcut = GHOSTLING_COPY_SHORTCUT_CTRL_C;
+            if (parse_copy_shortcut(val, &shortcut))
+                cfg->selection_copy_shortcut = shortcut;
+        } else if (strcmp(key, "paste_shortcut") == 0) {
+            GhostlingPasteShortcut shortcut =
+                GHOSTLING_PASTE_SHORTCUT_CTRL_SHIFT_V;
+            if (parse_paste_shortcut(val, &shortcut))
+                cfg->paste_shortcut = shortcut;
         }
     }
     fclose(f);
@@ -215,6 +309,9 @@ void config_load(AppConfig *cfg)
     cfg->tab_title_font_scale = 0.8f;
     cfg->tab_title_h = 18;
     cfg->tab_reserved_h = 24;
+    cfg->selection_copy_on_select = true;
+    cfg->selection_copy_shortcut = GHOSTLING_COPY_SHORTCUT_CTRL_C;
+    cfg->paste_shortcut = GHOSTLING_PASTE_SHORTCUT_CTRL_SHIFT_V;
 
     char path[4096];
     if (config_default_path(path, sizeof(path)))

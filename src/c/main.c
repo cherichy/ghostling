@@ -111,6 +111,93 @@ static void layout_terms(int scr_w, int scr_h, int tab_strip_w, int cell_width,
     *term_rows = (uint16_t)rows;
 }
 
+static void tab_selection_clear(Tab *t)
+{
+    t->selection_active = false;
+    t->selection_dragging = false;
+}
+
+static void tab_selection_normalize(const Tab *t, uint16_t *x0, uint16_t *y0,
+                                    uint16_t *x1, uint16_t *y1)
+{
+    *x0 = t->selection_anchor_x;
+    *y0 = t->selection_anchor_y;
+    *x1 = t->selection_focus_x;
+    *y1 = t->selection_focus_y;
+
+    if (*y0 > *y1 || (*y0 == *y1 && *x0 > *x1)) {
+        uint16_t tx = *x0, ty = *y0;
+        *x0 = *x1;
+        *y0 = *y1;
+        *x1 = tx;
+        *y1 = ty;
+    }
+}
+
+static void mouse_to_cell_clamped(Vector2 mpos, int grid_origin_x,
+                                  int grid_origin_y, int term_pixel_w,
+                                  int term_pixel_h, int cell_width,
+                                  int cell_height, uint16_t term_cols,
+                                  uint16_t term_rows, uint16_t *out_x,
+                                  uint16_t *out_y)
+{
+    float x = mpos.x;
+    float y = mpos.y;
+    float max_x = (float)(grid_origin_x + term_pixel_w - 1);
+    float max_y = (float)(grid_origin_y + term_pixel_h - 1);
+
+    if (x < (float)grid_origin_x)
+        x = (float)grid_origin_x;
+    if (y < (float)grid_origin_y)
+        y = (float)grid_origin_y;
+    if (x > max_x)
+        x = max_x;
+    if (y > max_y)
+        y = max_y;
+
+    int col = (int)((x - (float)grid_origin_x) / (float)cell_width);
+    int row = (int)((y - (float)grid_origin_y) / (float)cell_height);
+    if (col < 0)
+        col = 0;
+    if (row < 0)
+        row = 0;
+    if (col >= (int)term_cols)
+        col = (int)term_cols - 1;
+    if (row >= (int)term_rows)
+        row = (int)term_rows - 1;
+
+    *out_x = (uint16_t)col;
+    *out_y = (uint16_t)row;
+}
+
+static bool selection_copy_shortcut_pressed(GhostlingCopyShortcut shortcut)
+{
+    bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    if (!ctrl)
+        return false;
+
+    if (shortcut == GHOSTLING_COPY_SHORTCUT_CTRL_SHIFT_C)
+        return shift && IsKeyPressed(KEY_C);
+
+    return IsKeyPressed(KEY_C);
+}
+
+static bool paste_shortcut_pressed(GhostlingPasteShortcut shortcut)
+{
+    bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+    bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    if (!ctrl)
+        return false;
+
+    if (shortcut == GHOSTLING_PASTE_SHORTCUT_NONE)
+        return false;
+    if (shortcut == GHOSTLING_PASTE_SHORTCUT_CTRL_SHIFT_V)
+        return shift && IsKeyPressed(KEY_V);
+
+    return IsKeyPressed(KEY_V);
+}
+
 static void close_tab_at(Tab **tabs, size_t *n_tabs, size_t *active, size_t idx)
 {
     if (*n_tabs <= 1)
@@ -589,12 +676,103 @@ int main(int argc, char *argv[])
             frame_activity = true;
 
         if (!cur->child_exited && edit_tab == TAB_EDIT_NONE) {
-            if (handle_input(tab_pty_write(cur), key_encoder, key_event,
+            int term_pixel_w = (int)term_cols * cell_width;
+            int term_pixel_h = (int)term_rows * cell_height;
+            bool mouse_in_terminal =
+                mpos.x >= (float)grid_origin_x &&
+                mpos.y >= (float)grid_origin_y &&
+                mpos.x < (float)(grid_origin_x + term_pixel_w) &&
+                mpos.y < (float)(grid_origin_y + term_pixel_h);
+
+            bool mouse_tracking = false;
+            ghostty_terminal_get(cur->terminal, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING,
+                                 &mouse_tracking);
+
+            if (!mouse_tracking && !scrollbar_consumed) {
+                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                    if (mouse_in_terminal &&
+                        !(tab_strip_collapsed &&
+                          tab_splitter_toggle_hit(mpos, 0, ui_h))) {
+                        uint16_t sel_x = 0, sel_y = 0;
+                        mouse_to_cell_clamped(mpos, grid_origin_x, grid_origin_y,
+                                              term_pixel_w, term_pixel_h,
+                                              cell_width, cell_height, term_cols,
+                                              term_rows, &sel_x, &sel_y);
+                        cur->selection_anchor_x = sel_x;
+                        cur->selection_anchor_y = sel_y;
+                        cur->selection_focus_x = sel_x;
+                        cur->selection_focus_y = sel_y;
+                        cur->selection_active = true;
+                        cur->selection_dragging = true;
+                        frame_activity = true;
+                    } else if (cur->selection_active) {
+                        tab_selection_clear(cur);
+                        frame_activity = true;
+                    }
+                }
+
+                if (cur->selection_dragging && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                    uint16_t sel_x = cur->selection_focus_x;
+                    uint16_t sel_y = cur->selection_focus_y;
+                    mouse_to_cell_clamped(mpos, grid_origin_x, grid_origin_y,
+                                          term_pixel_w, term_pixel_h, cell_width,
+                                          cell_height, term_cols, term_rows,
+                                          &sel_x, &sel_y);
+                    if (sel_x != cur->selection_focus_x ||
+                        sel_y != cur->selection_focus_y) {
+                        cur->selection_focus_x = sel_x;
+                        cur->selection_focus_y = sel_y;
+                        frame_activity = true;
+                    }
+                }
+
+                if (cur->selection_dragging &&
+                    IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
+                    cur->selection_dragging = false;
+                    frame_activity = true;
+
+                    if (app_cfg.selection_copy_on_select &&
+                        cur->selection_active) {
+                        uint16_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+                        tab_selection_normalize(cur, &x0, &y0, &x1, &y1);
+                        if (copy_viewport_selection_to_clipboard(
+                                cur->terminal, term_cols, term_rows, x0, y0,
+                                x1, y1))
+                            frame_activity = true;
+                    }
+                }
+            }
+
+            bool copy_triggered =
+                selection_copy_shortcut_pressed(app_cfg.selection_copy_shortcut) &&
+                cur->selection_active;
+            bool copied_shortcut = copy_triggered;
+            if (copy_triggered) {
+                uint16_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+                tab_selection_normalize(cur, &x0, &y0, &x1, &y1);
+                if (copy_viewport_selection_to_clipboard(cur->terminal, term_cols,
+                                                         term_rows, x0, y0, x1,
+                                                         y1)) {
+                    tab_selection_clear(cur);
+                    frame_activity = true;
+                }
+            }
+
+            bool paste_triggered = paste_shortcut_pressed(app_cfg.paste_shortcut);
+            bool pasted_shortcut = paste_triggered;
+            if (paste_triggered) {
+                if (paste_host_clipboard_to_terminal(tab_pty_write(cur),
+                                                     cur->terminal)) {
+                    tab_selection_clear(cur);
+                    frame_activity = true;
+                }
+            }
+
+            if (!copied_shortcut && !pasted_shortcut &&
+                handle_input(tab_pty_write(cur), key_encoder, key_event,
                              cur->terminal))
                 frame_activity = true;
 
-            int term_pixel_w = (int)term_cols * cell_width;
-            int term_pixel_h = (int)term_rows * cell_height;
             int mouse_pad_right = ui_w - grid_origin_x - term_pixel_w;
             int mouse_pad_bottom = ui_h - grid_origin_y - term_pixel_h;
             if (mouse_pad_right < 0)
@@ -602,10 +780,7 @@ int main(int argc, char *argv[])
             if (mouse_pad_bottom < 0)
                 mouse_pad_bottom = 0;
 
-            if (focused && !scrollbar_consumed && mpos.x >= (float)grid_origin_x &&
-                mpos.y >= (float)grid_origin_y &&
-                mpos.x < (float)(grid_origin_x + term_pixel_w) &&
-                mpos.y < (float)(grid_origin_y + term_pixel_h) &&
+            if (focused && !scrollbar_consumed && mouse_in_terminal &&
                 !(tab_strip_collapsed &&
                   tab_splitter_toggle_hit(mpos, 0, ui_h)))
                 if (handle_mouse(tab_pty_write(cur), mouse_encoder, mouse_event,
@@ -666,11 +841,17 @@ int main(int argc, char *argv[])
         Color tab_fg = {220, 220, 220, 255};
         Color edit_bg = {50, 70, 95, 255};
 
+        bool selection_active = cur->selection_active;
+        uint16_t sel_x0 = 0, sel_y0 = 0, sel_x1 = 0, sel_y1 = 0;
+        if (selection_active)
+            tab_selection_normalize(cur, &sel_x0, &sel_y0, &sel_x1, &sel_y1);
+
         BeginDrawing();
         ClearBackground(win_bg);
         render_terminal(render_state, row_iter, row_cells, mono_font, cell_width,
                         cell_height, font_size, scrollbar_ptr, grid_origin_x,
-                        grid_origin_y, term_rows, pad);
+                        grid_origin_y, term_rows, pad, selection_active,
+                        sel_x0, sel_y0, sel_x1, sel_y1);
         /* Match render_terminal: logical size for DrawTextEx vs GetScreen* coords. */
         float tab_title_font_px =
             (float)font_size * app_cfg.tab_title_font_scale;

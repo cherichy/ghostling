@@ -33,3 +33,21 @@ tab_title_h = 18
 
 # 每个 tab 下半部分预留高度（当前为空白，供以后状态等）。范围 8～128。默认 24。
 tab_reserved_h = 24
+
+# ---------------------------------------------------------------------------
+# 鼠标选择 / 剪贴板
+# ---------------------------------------------------------------------------
+
+# 鼠标左键拖选后，是否在松开时立即复制到系统剪贴板。默认 true。
+selection_copy_on_select = true
+
+# 本地选区的复制快捷键（当存在选区时优先复制，不再把 Ctrl+C 发送给 shell）：
+#   ctrl+c（默认）
+#   ctrl+shift+c
+selection_copy_shortcut = ctrl+c
+
+# 粘贴系统剪贴板到 PTY 的快捷键：
+#   ctrl+shift+v（默认，推荐，不干扰 shell/TUI 的 ctrl+v）
+#   ctrl+v
+#   none（禁用终端级粘贴快捷键）
+paste_shortcut = ctrl+shift+v
