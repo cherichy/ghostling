@@ -1,4 +1,5 @@
 #include "config_font.h"
+#include "han_table.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,7 +145,71 @@ static void ascii_lower_copy(char *out, size_t out_sz, const char *in)
 static bool codepoint_set_valid(const char *set_name)
 {
     return strcmp(set_name, "full") == 0 || strcmp(set_name, "compact") == 0 ||
-           strcmp(set_name, "latin") == 0;
+           strcmp(set_name, "latin") == 0 ||
+           strcmp(set_name, "han3500") == 0 ||
+           strcmp(set_name, "han6500") == 0 ||
+           strcmp(set_name, "han8105") == 0;
+}
+
+static bool han_table_contains(const uint32_t *table, size_t count, uint32_t cp)
+{
+    size_t lo = 0;
+    size_t hi = count;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        uint32_t v = table[mid];
+        if (v == cp)
+            return true;
+        if (v < cp)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return false;
+}
+
+GhostlingHanTier ghostling_han_tier_from_codepoint_set(const char *set_name)
+{
+    if (!set_name)
+        return GHOSTLING_HAN_TIER_NONE;
+    if (strcmp(set_name, "han3500") == 0)
+        return GHOSTLING_HAN_TIER_3500;
+    if (strcmp(set_name, "han6500") == 0)
+        return GHOSTLING_HAN_TIER_6500;
+    if (strcmp(set_name, "han8105") == 0)
+        return GHOSTLING_HAN_TIER_8105;
+    return GHOSTLING_HAN_TIER_NONE;
+}
+
+GhostlingHanTier ghostling_han_tier_for_codepoint(uint32_t codepoint)
+{
+    if (codepoint < 0x3400 || codepoint > 0x2CE93)
+        return GHOSTLING_HAN_TIER_NONE;
+
+    if (han_table_contains(ghostling_han_level1, ghostling_han_level1_count,
+                           codepoint))
+        return GHOSTLING_HAN_TIER_3500;
+    if (han_table_contains(ghostling_han_level2, ghostling_han_level2_count,
+                           codepoint))
+        return GHOSTLING_HAN_TIER_6500;
+    if (han_table_contains(ghostling_han_level3, ghostling_han_level3_count,
+                           codepoint))
+        return GHOSTLING_HAN_TIER_8105;
+    return GHOSTLING_HAN_TIER_NONE;
+}
+
+const char *ghostling_codepoint_set_for_han_tier(GhostlingHanTier tier)
+{
+    switch (tier) {
+    case GHOSTLING_HAN_TIER_3500:
+        return "han3500";
+    case GHOSTLING_HAN_TIER_6500:
+        return "han6500";
+    case GHOSTLING_HAN_TIER_8105:
+        return "han8105";
+    default:
+        return NULL;
+    }
 }
 
 static bool parse_bool_value(const char *val, bool *out)
@@ -339,6 +404,17 @@ static bool append_range(int *buf, int *n, int cap, int lo, int hi)
     return true;
 }
 
+static bool append_codepoints(int *buf, int *n, int cap, const uint32_t *list,
+                              size_t list_count)
+{
+    for (size_t i = 0; i < list_count; i++) {
+        if (*n >= cap)
+            return false;
+        buf[(*n)++] = (int)list[i];
+    }
+    return true;
+}
+
 int *build_terminal_codepoints(const char *set_name, int *out_count)
 {
     const int cap = 65536;
@@ -357,6 +433,8 @@ int *build_terminal_codepoints(const char *set_name, int *out_count)
             return NULL;                                                     \
         }                                                                      \
     } while (0)
+
+    GhostlingHanTier han_tier = ghostling_han_tier_from_codepoint_set(set);
 
     /* Base set shared by all profiles: Latin + symbols + box drawing. */
     R(0x20, 0x7E);
@@ -378,12 +456,37 @@ int *build_terminal_codepoints(const char *set_name, int *out_count)
      * Keep this narrow to avoid a large atlas jump from loading all PUA codepoints. */
     R(0xE0A0, 0xE0D7);
 
-    if (strcmp(set, "latin") != 0) {
+    if (han_tier != GHOSTLING_HAN_TIER_NONE) {
+        /* Han tiers intentionally avoid Hiragana/Katakana and keep Chinese punctuation/fullwidth. */
+        R(0x3000, 0x303F);
+        R(0xFF00, 0xFFEF);
+
+        if (!append_codepoints(cp, &n, cap, ghostling_han_level1,
+                               ghostling_han_level1_count)) {
+            free(cp);
+            return NULL;
+        }
+        if (han_tier >= GHOSTLING_HAN_TIER_6500 &&
+            !append_codepoints(cp, &n, cap, ghostling_han_level2,
+                               ghostling_han_level2_count)) {
+            free(cp);
+            return NULL;
+        }
+        if (han_tier >= GHOSTLING_HAN_TIER_8105 &&
+            !append_codepoints(cp, &n, cap, ghostling_han_level3,
+                               ghostling_han_level3_count)) {
+            free(cp);
+            return NULL;
+        }
+    } else if (strcmp(set, "latin") != 0) {
         /* Compact/full keep CJK core blocks for Chinese/Japanese/Korean text. */
         R(0x3000, 0x30FF);
         R(0x31F0, 0x31FF);
         R(0x4E00, 0x9FFF);
         R(0xFF00, 0xFFEF);
+    }
+
+    if (strcmp(set, "latin") != 0) {
 
         /* Common Nerd Font icon blocks used by prompts/TUI statuslines.
          * Keep these in compact/full so NF glyphs render without forcing

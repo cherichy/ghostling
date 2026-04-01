@@ -2,6 +2,7 @@
 #define GHOSTLING_TERMINAL_UI_H
 
 #include "pty_common.h"
+#include "config_font.h"
 #include <ghostty/vt.h>
 #include "raylib.h"
 
@@ -26,13 +27,12 @@ bool copy_viewport_selection_to_clipboard(GhosttyTerminal terminal,
 bool paste_host_clipboard_to_terminal(PtyHandle pty_fd, GhosttyTerminal terminal);
 /** @param font_size Logical point size for DrawTextEx (matches config); atlas is
  *  loaded larger on HiDPI — must stay logical here or cells and glyphs misalign. */
-void render_terminal(GhosttyRenderState render_state,
-                     GhosttyRenderStateRowIterator row_iter,
-                     GhosttyRenderStateRowCells cells, Font font,
-                     int cell_width, int cell_height, int font_size,
-                     const GhosttyTerminalScrollbar *scrollbar, int grid_origin_x,
-                     int grid_origin_y, uint16_t term_rows, int pad_right,
-                     bool selection_active, uint16_t sel_x0, uint16_t sel_y0,
-                     uint16_t sel_x1, uint16_t sel_y1);
+GhostlingHanTier render_terminal(
+    GhosttyRenderState render_state, GhosttyRenderStateRowIterator row_iter,
+    GhosttyRenderStateRowCells cells, Font font, int cell_width, int cell_height,
+    int font_size, const GhosttyTerminalScrollbar *scrollbar, int grid_origin_x,
+    int grid_origin_y, uint16_t term_rows, int pad_right, bool selection_active,
+    uint16_t sel_x0, uint16_t sel_y0, uint16_t sel_x1, uint16_t sel_y1,
+    GhostlingHanTier current_han_tier);
 
 #endif

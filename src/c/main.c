@@ -34,6 +34,35 @@
 #include "tabs.h"
 #include "terminal_ui.h"
 
+static void raylib_trace_filter_callback(int log_level, const char *text,
+                                         va_list args)
+{
+    /* We change target FPS frequently (active/idle/unfocused), and raylib emits
+     * an INFO line on every SetTargetFPS() call. Filter only that noisy line while
+     * keeping all other diagnostics visible. */
+    if (log_level == LOG_INFO &&
+        strstr(text, "TIMER: Target time per frame") != NULL)
+        return;
+
+    const char *prefix = "LOG";
+    if (log_level == LOG_TRACE)
+        prefix = "TRACE";
+    else if (log_level == LOG_DEBUG)
+        prefix = "DEBUG";
+    else if (log_level == LOG_INFO)
+        prefix = "INFO";
+    else if (log_level == LOG_WARNING)
+        prefix = "WARNING";
+    else if (log_level == LOG_ERROR)
+        prefix = "ERROR";
+    else if (log_level == LOG_FATAL)
+        prefix = "FATAL";
+
+    fprintf(stderr, "%s: ", prefix);
+    vfprintf(stderr, text, args);
+    fputc('\n', stderr);
+}
+
 static int utf8_encode(uint32_t cp, char out[4])
 {
     const uint32_t MAX_UNICODE = 0x10FFFF;
@@ -242,9 +271,59 @@ static void apply_strip_resize(int scr_w, int scr_h, int *tab_strip_w,
                        cell_height);
 }
 
+static bool reload_terminal_font(Font *font, const AppConfig *cfg,
+                                 Vector2 dpi_scale, int *font_size_px,
+                                 int *cell_width, int *cell_height)
+{
+    int cp_count = 0;
+    int *codepoints = build_terminal_codepoints(cfg->font_codepoint_set, &cp_count);
+    if (!codepoints || cp_count <= 0) {
+        free(codepoints);
+        return false;
+    }
+
+    int new_font_size_px = (int)(cfg->font_size * dpi_scale.y);
+    const char *font_path_try = cfg->font_path[0] ? cfg->font_path : NULL;
+    Font new_font = load_terminal_font(font_path_try, font_jetbrains_mono,
+                                       (int)sizeof(font_jetbrains_mono),
+                                       new_font_size_px, codepoints, cp_count);
+    free(codepoints);
+
+    if (new_font.glyphCount <= 0 || new_font.texture.id == 0)
+        return false;
+
+    SetTextureFilter(new_font.texture, TEXTURE_FILTER_POINT);
+
+    Vector2 glyph_size =
+        MeasureTextEx(new_font, "M", (float)new_font_size_px, 0);
+    int new_cell_w = (int)((glyph_size.x / dpi_scale.x) + 0.5f);
+    int new_cell_h = (int)((glyph_size.y / dpi_scale.y) + 0.5f);
+    if (new_cell_w < 1)
+        new_cell_w = 1;
+    if (new_cell_h < 1)
+        new_cell_h = 1;
+
+    UnloadFont(*font);
+    *font = new_font;
+    *font_size_px = new_font_size_px;
+    *cell_width = new_cell_w;
+    *cell_height = new_cell_h;
+
+    int atlas_bytes = GetPixelDataSize(font->texture.width, font->texture.height,
+                                       font->texture.format);
+    fprintf(stderr,
+            "ghostling: font atlas set=%s codepoints=%d texture=%dx%d (~%.1f MiB)\n",
+            cfg->font_codepoint_set, cp_count, font->texture.width,
+            font->texture.height, (double)atlas_bytes / (1024.0 * 1024.0));
+
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
     const char *shell_override = (argc > 1) ? argv[1] : NULL;
+
+    SetTraceLogCallback(raylib_trace_filter_callback);
 
     log_build_info();
 
@@ -306,6 +385,9 @@ int main(int argc, char *argv[])
         cell_width = 1;
     if (cell_height < 1)
         cell_height = 1;
+
+    GhostlingHanTier current_han_tier =
+        ghostling_han_tier_from_codepoint_set(app_cfg.font_codepoint_set);
 
     const int pad = 4;
 
@@ -857,10 +939,11 @@ int main(int argc, char *argv[])
 
         BeginDrawing();
         ClearBackground(win_bg);
-        render_terminal(render_state, row_iter, row_cells, mono_font, cell_width,
-                        cell_height, font_size, scrollbar_ptr, grid_origin_x,
-                        grid_origin_y, term_rows, pad, selection_active,
-                        sel_x0, sel_y0, sel_x1, sel_y1);
+        GhostlingHanTier missing_han_tier = render_terminal(
+            render_state, row_iter, row_cells, mono_font, cell_width,
+            cell_height, font_size, scrollbar_ptr, grid_origin_x, grid_origin_y,
+            term_rows, pad, selection_active, sel_x0, sel_y0, sel_x1, sel_y1,
+            current_han_tier);
         /* Match render_terminal: logical size for DrawTextEx vs GetScreen* coords. */
         float tab_title_font_px =
             (float)font_size * app_cfg.tab_title_font_scale;
@@ -910,6 +993,41 @@ int main(int argc, char *argv[])
         }
 
         EndDrawing();
+
+        if (current_han_tier != GHOSTLING_HAN_TIER_NONE &&
+            missing_han_tier > current_han_tier) {
+            GhostlingHanTier next_han_tier = current_han_tier;
+            if (current_han_tier == GHOSTLING_HAN_TIER_3500)
+                next_han_tier = GHOSTLING_HAN_TIER_6500;
+            else if (current_han_tier == GHOSTLING_HAN_TIER_6500)
+                next_han_tier = GHOSTLING_HAN_TIER_8105;
+
+            const char *next_set =
+                ghostling_codepoint_set_for_han_tier(next_han_tier);
+            if (next_set) {
+                snprintf(app_cfg.font_codepoint_set,
+                         sizeof(app_cfg.font_codepoint_set), "%s", next_set);
+
+                if (reload_terminal_font(&mono_font, &app_cfg, dpi_scale,
+                                         &font_size_px, &cell_width,
+                                         &cell_height)) {
+                    current_han_tier = next_han_tier;
+                    frame_activity = true;
+                    clamp_tab_strip_w(ui_w, cell_width, pad, &tab_strip_w);
+                    layout_terms(ui_w, ui_h,
+                                 tab_strip_layout_w(tab_strip_collapsed,
+                                                    tab_strip_w),
+                                 cell_width, cell_height, pad, &term_cols,
+                                 &term_rows, &grid_origin_x, &grid_origin_y);
+                    for (size_t i = 0; i < n_tabs; i++)
+                        tab_resize_pty(tab_list[i], term_cols, term_rows,
+                                       cell_width, cell_height);
+                    fprintf(stderr,
+                            "ghostling: upgraded Han table tier to %s after glyph miss\n",
+                            next_set);
+                }
+            }
+        }
     }
 
 cleanup:

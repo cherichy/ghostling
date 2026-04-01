@@ -776,24 +776,25 @@ static bool selection_contains_cell(bool selection_active, uint16_t sel_x0,
     return true;
 }
 
-void render_terminal(GhosttyRenderState render_state,
-                     GhosttyRenderStateRowIterator row_iter,
-                     GhosttyRenderStateRowCells cells, Font font,
-                     int cell_width, int cell_height, int font_size,
-                     const GhosttyTerminalScrollbar *scrollbar, int grid_origin_x,
-                     int grid_origin_y, uint16_t term_rows, int pad_right,
-                     bool selection_active, uint16_t sel_x0, uint16_t sel_y0,
-                     uint16_t sel_x1, uint16_t sel_y1)
+GhostlingHanTier render_terminal(
+    GhosttyRenderState render_state, GhosttyRenderStateRowIterator row_iter,
+    GhosttyRenderStateRowCells cells, Font font, int cell_width, int cell_height,
+    int font_size, const GhosttyTerminalScrollbar *scrollbar, int grid_origin_x,
+    int grid_origin_y, uint16_t term_rows, int pad_right, bool selection_active,
+    uint16_t sel_x0, uint16_t sel_y0, uint16_t sel_x1, uint16_t sel_y1,
+    GhostlingHanTier current_han_tier)
 {
+    GhostlingHanTier missing_han_tier = GHOSTLING_HAN_TIER_NONE;
+
     GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
     if (ghostty_render_state_colors_get(render_state, &colors) !=
         GHOSTTY_SUCCESS)
-        return;
+        return GHOSTLING_HAN_TIER_NONE;
 
     if (ghostty_render_state_get(render_state,
                                  GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR,
                                  &row_iter) != GHOSTTY_SUCCESS)
-        return;
+        return GHOSTLING_HAN_TIER_NONE;
 
     int y = grid_origin_y;
     uint16_t row_idx = 0;
@@ -868,6 +869,13 @@ void render_terminal(GhosttyRenderState render_state,
             char text[64];
             int pos = 0;
             for (uint32_t i = 0; i < len && pos < 60; i++) {
+                if (current_han_tier != GHOSTLING_HAN_TIER_NONE &&
+                    current_han_tier != GHOSTLING_HAN_TIER_8105) {
+                    GhostlingHanTier cp_tier =
+                        ghostling_han_tier_for_codepoint(codepoints[i]);
+                    if (cp_tier > current_han_tier && cp_tier > missing_han_tier)
+                        missing_han_tier = cp_tier;
+                }
                 char u8[4];
                 int n = utf8_encode(codepoints[i], u8);
                 memcpy(&text[pos], u8, (size_t)n);
@@ -984,6 +992,8 @@ void render_terminal(GhosttyRenderState render_state,
     GhosttyRenderStateDirty clean_state = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
     ghostty_render_state_set(render_state, GHOSTTY_RENDER_STATE_OPTION_DIRTY,
                              &clean_state);
+
+    return missing_han_tier;
 }
 
 void log_build_info(void)

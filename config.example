@@ -19,6 +19,10 @@ font_size = 16
 #   full    = 完整集合（默认，含 CJK + Nerd 扩展图标，约 42k codepoints）
 #   compact = 常用 CJK + 全角 + 常见 Nerd 图标，约 28k codepoints
 #   latin   = 拉丁/符号/框线 + powerline 分隔符（不含 CJK，约 2.4k codepoints）
+#   han3500 = 拉丁/符号 + Nerd + 通用规范汉字一级字表（3500）
+#   han6500 = 在 han3500 基础上加入二级字表（累计 6500）
+#   han8105 = 在 han6500 基础上加入三级字表（累计 8105）
+#             启动为 han3500/6500 时，运行中遇到缺字会自动升级到更高层
 font_codepoint_set = full
 
 # ---------------------------------------------------------------------------

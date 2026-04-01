@@ -2,6 +2,7 @@
 #define GHOSTLING_CONFIG_FONT_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "raylib.h"
 
 typedef enum {
@@ -14,6 +15,13 @@ typedef enum {
     GHOSTLING_PASTE_SHORTCUT_CTRL_V = 1,
     GHOSTLING_PASTE_SHORTCUT_NONE = 2,
 } GhostlingPasteShortcut;
+
+typedef enum {
+    GHOSTLING_HAN_TIER_NONE = 0,
+    GHOSTLING_HAN_TIER_3500 = 1,
+    GHOSTLING_HAN_TIER_6500 = 2,
+    GHOSTLING_HAN_TIER_8105 = 3,
+} GhostlingHanTier;
 
 typedef struct {
     char font_path[4096];
@@ -37,6 +45,9 @@ typedef struct {
 
 void config_load(AppConfig *cfg);
 int *build_terminal_codepoints(const char *set_name, int *out_count);
+GhostlingHanTier ghostling_han_tier_from_codepoint_set(const char *set_name);
+GhostlingHanTier ghostling_han_tier_for_codepoint(uint32_t codepoint);
+const char *ghostling_codepoint_set_for_han_tier(GhostlingHanTier tier);
 Font load_terminal_font(const char *path, const unsigned char *embed,
                         int embed_size, int font_size_px, int *codepoints,
                         int cp_count);
