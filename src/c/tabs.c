@@ -14,6 +14,9 @@
 enum {
     TAB_TOGGLE_W = 22,
     TAB_TOGGLE_H = 28,
+    TAB_OSC_FILTER_MODE_NORMAL = 0,
+    TAB_OSC_FILTER_MODE_ESC = 1,
+    TAB_OSC_FILTER_MODE_OSC = 2,
 };
 
 typedef struct {
@@ -63,6 +66,134 @@ static void tab_ingest_effects(Tab *t, const uint8_t *data, size_t len)
     effect_scan_icon_osc(&t->effects, data, len);
 }
 
+static void tab_ingest_terminal(Tab *t, const uint8_t *data, size_t len);
+
+static void tab_osc1_filter_reset(Tab *t)
+{
+    t->osc1_filter_esc_pending = false;
+    t->osc1_filter_cmd_decided = false;
+    t->osc1_filter_drop = false;
+    t->osc1_filter_cmd = 0;
+    t->osc1_filter_cmd_digits = 0;
+    t->osc1_filter_raw_len = 0;
+}
+
+static void tab_osc1_filter_append_raw(Tab *t, uint8_t b)
+{
+    if (t->osc1_filter_raw_len >= sizeof(t->osc1_filter_raw)) {
+        t->osc1_filter_drop = true;
+        return;
+    }
+    t->osc1_filter_raw[t->osc1_filter_raw_len++] = b;
+}
+
+static void tab_osc1_filter_forward_raw(Tab *t)
+{
+    if (t->osc1_filter_raw_len == 0)
+        return;
+    tab_ingest_terminal(t, t->osc1_filter_raw, t->osc1_filter_raw_len);
+}
+
+static void tab_ingest_terminal_filtered(Tab *t, const uint8_t *data, size_t len)
+{
+    if (!t->terminal || !data || len == 0)
+        return;
+
+    uint8_t out[4096];
+    size_t out_len = 0;
+
+#define TAB_FLUSH_OUT()                                                         \
+    do {                                                                         \
+        if (out_len > 0) {                                                       \
+            tab_ingest_terminal(t, out, out_len);                                \
+            out_len = 0;                                                         \
+        }                                                                        \
+    } while (0)
+
+    for (size_t i = 0; i < len; i++) {
+        uint8_t b = data[i];
+
+        switch (t->osc1_filter_mode) {
+        case TAB_OSC_FILTER_MODE_NORMAL:
+            if (b == 0x1B) {
+                TAB_FLUSH_OUT();
+                t->osc1_filter_mode = TAB_OSC_FILTER_MODE_ESC;
+                tab_osc1_filter_reset(t);
+                tab_osc1_filter_append_raw(t, b);
+            } else {
+                if (out_len < sizeof(out))
+                    out[out_len++] = b;
+            }
+            break;
+
+        case TAB_OSC_FILTER_MODE_ESC:
+            tab_osc1_filter_append_raw(t, b);
+            if (b == ']') {
+                t->osc1_filter_mode = TAB_OSC_FILTER_MODE_OSC;
+            } else {
+                tab_osc1_filter_forward_raw(t);
+                t->osc1_filter_mode = TAB_OSC_FILTER_MODE_NORMAL;
+                tab_osc1_filter_reset(t);
+            }
+            break;
+
+        case TAB_OSC_FILTER_MODE_OSC:
+            tab_osc1_filter_append_raw(t, b);
+
+            if (t->osc1_filter_esc_pending) {
+                t->osc1_filter_esc_pending = false;
+                if (b == '\\') {
+                    if (!t->osc1_filter_drop)
+                        tab_osc1_filter_forward_raw(t);
+                    t->osc1_filter_mode = TAB_OSC_FILTER_MODE_NORMAL;
+                    tab_osc1_filter_reset(t);
+                    break;
+                }
+            }
+
+            if (!t->osc1_filter_cmd_decided) {
+                if (b >= '0' && b <= '9') {
+                    if (t->osc1_filter_cmd <= 99999999u)
+                        t->osc1_filter_cmd =
+                            t->osc1_filter_cmd * 10u + (unsigned)(b - '0');
+                    t->osc1_filter_cmd_digits++;
+                } else if (b == ';') {
+                    t->osc1_filter_cmd_decided = true;
+                    t->osc1_filter_drop =
+                        (t->osc1_filter_cmd_digits > 0 &&
+                         t->osc1_filter_cmd == 1u);
+                } else {
+                    t->osc1_filter_cmd_decided = true;
+                    t->osc1_filter_drop = false;
+                }
+            }
+
+            if (b == 0x07) {
+                if (!t->osc1_filter_drop)
+                    tab_osc1_filter_forward_raw(t);
+                t->osc1_filter_mode = TAB_OSC_FILTER_MODE_NORMAL;
+                tab_osc1_filter_reset(t);
+            } else if (b == 0x1B) {
+                t->osc1_filter_esc_pending = true;
+            }
+            break;
+
+        default:
+            t->osc1_filter_mode = TAB_OSC_FILTER_MODE_NORMAL;
+            tab_osc1_filter_reset(t);
+            break;
+        }
+
+        if (out_len == sizeof(out)) {
+            TAB_FLUSH_OUT();
+        }
+    }
+
+    TAB_FLUSH_OUT();
+
+#undef TAB_FLUSH_OUT
+}
+
 static void tab_ingest_terminal(Tab *t, const uint8_t *data, size_t len)
 {
     if (!t->terminal)
@@ -81,7 +212,7 @@ static void tab_ingest_output(void *userdata, const uint8_t *data, size_t len)
     tab_ingest_clipboard(t, data, len);
     tab_ingest_agent(t, data, len);
     tab_ingest_effects(t, data, len);
-    tab_ingest_terminal(t, data, len);
+    tab_ingest_terminal_filtered(t, data, len);
 }
 
 /** Fake bold for tab index digits without a separate bold font face. */

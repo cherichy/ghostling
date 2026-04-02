@@ -67,6 +67,15 @@ typedef struct Tab {
                              const GhostlingAgentState *before,
                              const GhostlingAgentState *after);
     void *agent_state_hook_userdata;
+
+    int osc1_filter_mode;
+    bool osc1_filter_esc_pending;
+    bool osc1_filter_cmd_decided;
+    bool osc1_filter_drop;
+    unsigned osc1_filter_cmd;
+    size_t osc1_filter_cmd_digits;
+    uint8_t osc1_filter_raw[512];
+    size_t osc1_filter_raw_len;
 } Tab;
 
 typedef enum {

@@ -150,6 +150,14 @@ static void raylib_trace_filter_callback(int log_level, const char *text,
         strstr(text, "TIMER: Target time per frame") != NULL)
         return;
 
+    /* Many box-drawing/powerline glyphs are intentionally tall/wide and can
+     * exceed raylib's nominal size checks; the per-codepoint warning spam is
+     * not actionable for our font sets and drowns useful diagnostics. */
+    if (log_level == LOG_WARNING &&
+        strstr(text, "FONT: Character [0x") != NULL &&
+        strstr(text, "size is bigger than expected font size") != NULL)
+        return;
+
     const char *prefix = "LOG";
     if (log_level == LOG_TRACE)
         prefix = "TRACE";
