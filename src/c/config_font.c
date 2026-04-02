@@ -493,7 +493,7 @@ static void config_set_defaults(AppConfig *cfg, const char *profile)
     cfg->loaded_config_path[0] = '\0';
     if (profile && profile[0])
         ascii_lower_copy(cfg->profile, sizeof(cfg->profile), profile);
-    cfg->tab_title_font_scale = 0.8f;
+    cfg->tab_title_font_scale = 1.0f;
     cfg->tab_title_h = 18;
     cfg->tab_reserved_h = 24;
     cfg->selection_copy_on_select = true;

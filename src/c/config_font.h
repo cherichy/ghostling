@@ -48,7 +48,7 @@ typedef struct {
     char profile[64];
     /** Resolved config path currently loaded (empty when no file exists). */
     char loaded_config_path[4096];
-    /** Tab title row uses mono font at (font_size_px * this). Default 0.8. */
+    /** Tab title row uses mono font at (font_size_px * this). Default 1.0. */
     float tab_title_font_scale;
     /** Height in pixels of the top band (title + close). Default 18. */
     int tab_title_h;
