@@ -8,7 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#ifndef SW_SHOWNORMAL
+#define SW_SHOWNORMAL 1
+#endif
+#else
 #include <spawn.h>
 #endif
 

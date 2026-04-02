@@ -158,6 +158,7 @@ pub fn build(b: *std.Build) void {
             ghostling.linkSystemLibrary("opengl32");
             ghostling.linkSystemLibrary("gdi32");
             ghostling.linkSystemLibrary("winmm");
+            ghostling.linkSystemLibrary("shell32");
             if (!(win_gnu and raylib_loc)) c_mod.linkSystemLibrary("glfw3", .{
                 .preferred_link_mode = .dynamic,
                 .search_strategy = .mode_first,
