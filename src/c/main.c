@@ -32,10 +32,13 @@
 
 #include "font_jetbrains_mono.h"
 
+#include "agent_events.h"
 #include "config_font.h"
 #include "effects.h"
 #include "tabs.h"
 #include "terminal_ui.h"
+
+bool ghostling_agent_state_run_tests(void);
 
 typedef struct {
     bool enabled;
@@ -424,6 +427,11 @@ static bool reload_terminal_font(Font *font, const AppConfig *cfg,
 
 int main(int argc, char *argv[])
 {
+    if (argc > 1 && strcmp(argv[1], "--selftest-agent-state") == 0) {
+        bool ok = ghostling_agent_state_run_tests();
+        return ok ? 0 : 1;
+    }
+
     const char *shell_override = (argc > 1) ? argv[1] : NULL;
 
     SetTraceLogCallback(raylib_trace_filter_callback);
@@ -501,6 +509,8 @@ int main(int argc, char *argv[])
     memset(tab_list, 0, sizeof(tab_list));
     size_t n_tabs = 0;
     size_t active = 0;
+    AgentEventBus agent_bus;
+    agent_event_bus_init(&agent_bus);
 
     int scr_w = GetScreenWidth();
     int scr_h = GetScreenHeight();
@@ -542,6 +552,8 @@ int main(int argc, char *argv[])
         CloseWindow();
         return 1;
     }
+    tab_set_agent_state_hook(tab_list[0], agent_event_bus_on_state_change,
+                             &agent_bus);
     n_tabs = 1;
 
     double last_tab_click_t = -100.0;
@@ -737,8 +749,7 @@ int main(int argc, char *argv[])
                 DWORD code = 0;
                 if (GetExitCodeProcess(t->pty_ctx.process, &code))
                     t->child_exit_status = (int)code;
-                ghostling_agent_state_on_process_exit(&t->agent_state,
-                                                      t->child_exit_status);
+                tab_agent_state_on_process_exit(t, t->child_exit_status);
             } else if (wstatus == WAIT_FAILED) {
                 t->child_reaped = true;
             }
@@ -751,8 +762,7 @@ int main(int argc, char *argv[])
                     t->child_exit_status = WEXITSTATUS(wstatus);
                 else if (WIFSIGNALED(wstatus))
                     t->child_exit_status = 128 + WTERMSIG(wstatus);
-                ghostling_agent_state_on_process_exit(&t->agent_state,
-                                                      t->child_exit_status);
+                tab_agent_state_on_process_exit(t, t->child_exit_status);
             }
 #endif
         }
@@ -789,6 +799,8 @@ int main(int argc, char *argv[])
                 Tab *nt = malloc(sizeof(Tab));
                 if (nt && tab_start_shell(nt, term_cols, term_rows, cell_width,
                                           cell_height, shell_override)) {
+                    tab_set_agent_state_hook(nt, agent_event_bus_on_state_change,
+                                             &agent_bus);
                     tab_list[n_tabs] = nt;
                     active = n_tabs;
                     n_tabs++;
@@ -860,6 +872,9 @@ int main(int argc, char *argv[])
                         if (nt && tab_start_shell(nt, term_cols, term_rows,
                                                   cell_width, cell_height,
                                                   shell_override)) {
+                            tab_set_agent_state_hook(
+                                nt, agent_event_bus_on_state_change,
+                                &agent_bus);
                             tab_list[n_tabs] = nt;
                             active = n_tabs;
                             n_tabs++;
@@ -1052,7 +1067,7 @@ int main(int argc, char *argv[])
             if (paste_triggered) {
                 if (paste_host_clipboard_to_terminal(tab_pty_write(cur),
                                                      cur->terminal)) {
-                    ghostling_agent_state_on_local_input(&cur->agent_state);
+                    tab_agent_state_on_local_input(cur);
                     tab_selection_clear(cur);
                     frame_activity = true;
                 }
@@ -1061,7 +1076,7 @@ int main(int argc, char *argv[])
             if (!copied_shortcut && !pasted_shortcut &&
                 handle_input(tab_pty_write(cur), key_encoder, key_event,
                              cur->terminal)) {
-                ghostling_agent_state_on_local_input(&cur->agent_state);
+                tab_agent_state_on_local_input(cur);
                 frame_activity = true;
             }
 

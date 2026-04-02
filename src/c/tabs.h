@@ -61,6 +61,12 @@ typedef struct Tab {
     uint16_t selection_anchor_y;
     uint16_t selection_focus_x;
     uint16_t selection_focus_y;
+
+    void (*agent_state_hook)(void *userdata,
+                             const struct Tab *tab,
+                             const GhostlingAgentState *before,
+                             const GhostlingAgentState *after);
+    void *agent_state_hook_userdata;
 } Tab;
 
 typedef enum {
@@ -87,6 +93,16 @@ PtyHandle tab_pty_write(Tab *t);
 
 void tab_display_title(const Tab *t, size_t tab_index_one_based, char *out,
                        size_t outsz);
+
+void tab_set_agent_state_hook(
+    Tab *t,
+    void (*hook)(void *userdata, const Tab *tab,
+                 const GhostlingAgentState *before,
+                 const GhostlingAgentState *after),
+    void *userdata);
+
+void tab_agent_state_on_local_input(Tab *t);
+void tab_agent_state_on_process_exit(Tab *t, int exit_status);
 
 bool tab_splitter_hit(Vector2 mpos, int strip_w, int scr_h);
 

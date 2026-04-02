@@ -207,10 +207,8 @@ DWORD WINAPI pty_reader_thread(LPVOID param)
     }
 }
 
-PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal,
-                            Osc52ClipboardState *osc52,
-                            GhostlingAgentState *agent_state,
-                            EffectsContext *effects)
+PtyReadResult pty_buf_drain(PtyReadBuf *rb, PtyOutputSink sink,
+                            void *sink_userdata)
 {
     uint8_t local[PTY_BUF_SIZE];
     size_t count = 0;
@@ -226,10 +224,8 @@ PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal,
     LeaveCriticalSection(&rb->cs);
 
     if (count > 0) {
-        osc52_clipboard_scan(osc52, local, count);
-        ghostling_agent_state_feed_output(agent_state, local, count);
-        effect_scan_icon_osc(effects, local, count);
-        ghostty_terminal_vt_write(terminal, local, count);
+        if (sink)
+            sink(sink_userdata, local, count);
     }
 
     if (count == 0 && is_eof)

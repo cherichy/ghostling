@@ -68,7 +68,9 @@ pub fn build(b: *std.Build) void {
     c_mod.addIncludePath(font_jbh.dirname());
 
     const c_files: []const []const u8 = if (target.result.os.tag == .windows) &.{
+        "src/c/agent_events.c",
         "src/c/agent_state.c",
+        "src/c/agent_state_test.c",
         "src/c/main.c",
         "src/c/pty_common.c",
         "src/c/pty_win.c",
@@ -78,7 +80,9 @@ pub fn build(b: *std.Build) void {
         "src/c/tabs.c",
         "src/c/terminal_ui.c",
     } else &.{
+        "src/c/agent_events.c",
         "src/c/agent_state.c",
+        "src/c/agent_state_test.c",
         "src/c/main.c",
         "src/c/pty_common.c",
         "src/c/pty_unix.c",

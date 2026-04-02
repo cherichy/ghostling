@@ -16,6 +16,74 @@ enum {
     TAB_TOGGLE_H = 28,
 };
 
+typedef struct {
+    Tab *tab;
+} TabPtySinkCtx;
+
+static void tab_agent_state_change_noop(void *userdata,
+                                        const Tab *tab,
+                                        const GhostlingAgentState *before,
+                                        const GhostlingAgentState *after)
+{
+    (void)userdata;
+    (void)tab;
+    (void)before;
+    (void)after;
+}
+
+static void tab_ingest_clipboard(Tab *t, const uint8_t *data, size_t len)
+{
+    osc52_clipboard_scan(&t->osc52, data, len);
+}
+
+static void tab_notify_agent_state_if_changed(Tab *t,
+                                              const GhostlingAgentState *before)
+{
+    if (!t->agent_state_hook)
+        return;
+
+    const GhostlingAgentState *after = &t->agent_state;
+    if (before->value == after->value && before->source == after->source &&
+        before->confidence == after->confidence &&
+        strcmp(before->protocol_agent, after->protocol_agent) == 0)
+        return;
+
+    t->agent_state_hook(t->agent_state_hook_userdata, t, before, after);
+}
+
+static void tab_ingest_agent(Tab *t, const uint8_t *data, size_t len)
+{
+    GhostlingAgentState before = t->agent_state;
+    ghostling_agent_state_feed_output(&t->agent_state, data, len);
+    tab_notify_agent_state_if_changed(t, &before);
+}
+
+static void tab_ingest_effects(Tab *t, const uint8_t *data, size_t len)
+{
+    effect_scan_icon_osc(&t->effects, data, len);
+}
+
+static void tab_ingest_terminal(Tab *t, const uint8_t *data, size_t len)
+{
+    if (!t->terminal)
+        return;
+    ghostty_terminal_vt_write(t->terminal, data, len);
+}
+
+static void tab_ingest_output(void *userdata, const uint8_t *data, size_t len)
+{
+    if (!userdata || !data || len == 0)
+        return;
+
+    TabPtySinkCtx *ctx = (TabPtySinkCtx *)userdata;
+    Tab *t = ctx->tab;
+
+    tab_ingest_clipboard(t, data, len);
+    tab_ingest_agent(t, data, len);
+    tab_ingest_effects(t, data, len);
+    tab_ingest_terminal(t, data, len);
+}
+
 /** Fake bold for tab index digits without a separate bold font face. */
 static void draw_text_synthetic_bold(Font font, const char *text, Vector2 pos,
                                      float font_size, Color fg)
@@ -57,6 +125,7 @@ void tab_init_struct(Tab *t)
 {
     memset(t, 0, sizeof(*t));
     ghostling_agent_state_init(&t->agent_state);
+    t->agent_state_hook = tab_agent_state_change_noop;
     osc52_clipboard_init(&t->osc52);
 #ifdef _WIN32
     t->pty_ctx.hpc = INVALID_HANDLE_VALUE;
@@ -66,6 +135,37 @@ void tab_init_struct(Tab *t)
     InitializeCriticalSection(&t->pty_rb.cs);
     t->pty_cs_inited = true;
 #endif
+}
+
+void tab_set_agent_state_hook(
+    Tab *t,
+    void (*hook)(void *userdata, const Tab *tab,
+                 const GhostlingAgentState *before,
+                 const GhostlingAgentState *after),
+    void *userdata)
+{
+    if (!t)
+        return;
+    t->agent_state_hook = hook;
+    t->agent_state_hook_userdata = userdata;
+}
+
+void tab_agent_state_on_local_input(Tab *t)
+{
+    if (!t)
+        return;
+    GhostlingAgentState before = t->agent_state;
+    ghostling_agent_state_on_local_input(&t->agent_state);
+    tab_notify_agent_state_if_changed(t, &before);
+}
+
+void tab_agent_state_on_process_exit(Tab *t, int exit_status)
+{
+    if (!t)
+        return;
+    GhostlingAgentState before = t->agent_state;
+    ghostling_agent_state_on_process_exit(&t->agent_state, exit_status);
+    tab_notify_agent_state_if_changed(t, &before);
 }
 
 void tab_free(Tab *t)
@@ -240,12 +340,12 @@ PtyReadResult tab_drain(Tab *t)
 {
     if (!t->in_use || t->child_exited)
         return PTY_READ_OK;
+
+    TabPtySinkCtx sink = {.tab = t};
 #ifdef _WIN32
-    return pty_buf_drain(&t->pty_rb, t->terminal, &t->osc52, &t->agent_state,
-                         &t->effects);
+    return pty_buf_drain(&t->pty_rb, tab_ingest_output, &sink);
 #else
-    return pty_read_unix(t->pty_fd, t->terminal, &t->osc52, &t->agent_state,
-                         &t->effects);
+    return pty_read_unix(t->pty_fd, tab_ingest_output, &sink);
 #endif
 }
 
