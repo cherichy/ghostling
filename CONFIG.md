@@ -95,11 +95,15 @@
 - 也可通过 `key_reload_config` 手动重载。
 - 重载时字体/码表相关项变更会触发图集重建。
 
-### OSC 7 / OSC 133 / OSC 8 当前行为
+### OSC 7 / OSC 133 / OSC 8 / OSC 99 当前行为
 
 - OSC 7（PWD）：会读取并更新内部工作目录状态，并用于窗口标题回退显示。
 - OSC 133（Prompt marks）：由 libghostty-vt 解析并存储语义信息（当前版本尚未做可视化 UI）。
 - OSC 8（Hyperlink）：可检测单元格是否带超链接并在悬停时显示手型光标。
+- OSC 99（Agent 状态协议）：支持 `v1|<state>|<agent>`，例如 `v1|waiting_input|claude`。
+  - 推荐发送：`printf '\033]99;v1|waiting_input|claude\007' > /dev/tty`
+  - `<state>` 支持：`running`、`waiting_input`、`done`、`error`、`idle`
+  - 收到后会在 tab 底部状态栏显示为 `[claude]: waiting`（无 agent 时仅显示状态）
 
 ### `tab_title_font_scale`
 

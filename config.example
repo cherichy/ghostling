@@ -76,3 +76,10 @@ key_reload_config = primary+shift+r
 # profile 覆盖示例（同一文件内定义多套）:
 # profile.work.font_size = 14
 # profile.work.key_next_tab = alt+tab
+
+# ---------------------------------------------------------------------------
+# Agent 状态协议（运行时由外部工具发，不是配置项）
+# ---------------------------------------------------------------------------
+# 推荐统一使用 OSC 99：
+#   printf '\033]99;v1|waiting_input|claude\007' > /dev/tty
+# v1 格式：v1|<state>|<agent>

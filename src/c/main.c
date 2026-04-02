@@ -737,6 +737,8 @@ int main(int argc, char *argv[])
                 DWORD code = 0;
                 if (GetExitCodeProcess(t->pty_ctx.process, &code))
                     t->child_exit_status = (int)code;
+                ghostling_agent_state_on_process_exit(&t->agent_state,
+                                                      t->child_exit_status);
             } else if (wstatus == WAIT_FAILED) {
                 t->child_reaped = true;
             }
@@ -749,6 +751,8 @@ int main(int argc, char *argv[])
                     t->child_exit_status = WEXITSTATUS(wstatus);
                 else if (WIFSIGNALED(wstatus))
                     t->child_exit_status = 128 + WTERMSIG(wstatus);
+                ghostling_agent_state_on_process_exit(&t->agent_state,
+                                                      t->child_exit_status);
             }
 #endif
         }
@@ -1048,6 +1052,7 @@ int main(int argc, char *argv[])
             if (paste_triggered) {
                 if (paste_host_clipboard_to_terminal(tab_pty_write(cur),
                                                      cur->terminal)) {
+                    ghostling_agent_state_on_local_input(&cur->agent_state);
                     tab_selection_clear(cur);
                     frame_activity = true;
                 }
@@ -1055,8 +1060,10 @@ int main(int argc, char *argv[])
 
             if (!copied_shortcut && !pasted_shortcut &&
                 handle_input(tab_pty_write(cur), key_encoder, key_event,
-                             cur->terminal))
+                             cur->terminal)) {
+                ghostling_agent_state_on_local_input(&cur->agent_state);
                 frame_activity = true;
+            }
 
             int mouse_pad_right = ui_w - grid_origin_x - term_pixel_w;
             int mouse_pad_bottom = ui_h - grid_origin_y - term_pixel_h;

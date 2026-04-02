@@ -1,6 +1,8 @@
 #ifndef GHOSTLING_PTY_WIN_H
 #define GHOSTLING_PTY_WIN_H
 
+#include "agent_state.h"
+#include "effects.h"
 #include "pty_common.h"
 #include "osc52_clipboard.h"
 #include <ghostty/vt.h>
@@ -29,7 +31,9 @@ bool pty_spawn_win32(PtyContext *ctx, uint16_t cols, uint16_t rows,
                      const char *shell_override);
 DWORD WINAPI pty_reader_thread(LPVOID param);
 PtyReadResult pty_buf_drain(PtyReadBuf *rb, GhosttyTerminal terminal,
-                            Osc52ClipboardState *osc52);
+                            Osc52ClipboardState *osc52,
+                            GhostlingAgentState *agent_state,
+                            EffectsContext *effects);
 void pty_resize_win32(HPCON hpc, uint16_t cols, uint16_t rows);
 void pty_cleanup_win(PtyContext *ctx);
 

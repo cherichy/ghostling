@@ -53,6 +53,7 @@ add_custom_command(
 
 # --- Our Project -------------------------------------------------------------
 set(GHOSTLING_C_SOURCES
+  src/c/agent_state.c
   src/c/main.c
   src/c/pty_common.c
   src/c/config_font.c

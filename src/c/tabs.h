@@ -3,6 +3,7 @@
 
 #include "raylib.h"
 
+#include "agent_state.h"
 #include "effects.h"
 #include "osc52_clipboard.h"
 #include "pty_common.h"
@@ -51,6 +52,7 @@ typedef struct Tab {
     bool child_exited;
     bool child_reaped;
     int child_exit_status;
+    GhostlingAgentState agent_state;
 
     /* Local mouse-selection state used for host-side clipboard copy. */
     bool selection_active;

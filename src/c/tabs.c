@@ -56,6 +56,7 @@ static void truncate_to_width(Font font, float font_size, const char *src,
 void tab_init_struct(Tab *t)
 {
     memset(t, 0, sizeof(*t));
+    ghostling_agent_state_init(&t->agent_state);
     osc52_clipboard_init(&t->osc52);
 #ifdef _WIN32
     t->pty_ctx.hpc = INVALID_HANDLE_VALUE;
@@ -141,6 +142,10 @@ void tab_display_title(const Tab *t, size_t tab_index_one_based, char *out,
         snprintf(out, outsz, "%s", e->title_override);
         return;
     }
+    if (e->title_icon[0] != '\0') {
+        snprintf(out, outsz, "%s", e->title_icon);
+        return;
+    }
     if (e->title_shell[0] != '\0') {
         snprintf(out, outsz, "%s", e->title_shell);
         return;
@@ -194,6 +199,7 @@ bool tab_start_shell(Tab *t, uint16_t cols, uint16_t rows, int cell_width,
     t->effects.cols = cols;
     t->effects.rows = rows;
     t->effects.title_shell[0] = '\0';
+    t->effects.title_icon[0] = '\0';
     t->effects.title_override[0] = '\0';
     t->effects.pwd[0] = '\0';
 
@@ -235,9 +241,11 @@ PtyReadResult tab_drain(Tab *t)
     if (!t->in_use || t->child_exited)
         return PTY_READ_OK;
 #ifdef _WIN32
-    return pty_buf_drain(&t->pty_rb, t->terminal, &t->osc52);
+    return pty_buf_drain(&t->pty_rb, t->terminal, &t->osc52, &t->agent_state,
+                         &t->effects);
 #else
-    return pty_read_unix(t->pty_fd, t->terminal, &t->osc52);
+    return pty_read_unix(t->pty_fd, t->terminal, &t->osc52, &t->agent_state,
+                         &t->effects);
 #endif
 }
 
@@ -436,6 +444,33 @@ void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
         float tx = (float)ix + 6.0f;
         float ty = (float)y0 + ((float)tab_title_h - ts.y) * 0.5f;
         DrawTextEx(font, line, (Vector2){tx, ty}, font_size, 0, fg);
+
+        if (tab_reserved_h > 0) {
+            float status_font = font_size * 0.8f;
+            if (status_font < 8.0f)
+                status_font = 8.0f;
+
+            char status_raw[96];
+            const char *agent_name =
+                ghostling_agent_state_agent(&tabs[i]->agent_state);
+            if (agent_name[0] != '\0') {
+                snprintf(status_raw, sizeof(status_raw), "[%s]: %s",
+                         agent_name,
+                         ghostling_agent_state_label(&tabs[i]->agent_state));
+            } else {
+                snprintf(status_raw, sizeof(status_raw), "%s",
+                         ghostling_agent_state_label(&tabs[i]->agent_state));
+            }
+
+            char status_line[96];
+            truncate_to_width(font, status_font, status_raw, label_max_w,
+                              status_line, sizeof(status_line));
+
+            Vector2 ss = MeasureTextEx(font, status_line, status_font, 0);
+            float sy = (float)y_res + ((float)tab_reserved_h - ss.y) * 0.5f;
+            DrawTextEx(font, status_line, (Vector2){tx, sy}, status_font, 0,
+                       fg);
+        }
 
         const char *x = "×";
         Vector2 xs = MeasureTextEx(font, x, font_size, 0);
