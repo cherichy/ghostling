@@ -10,6 +10,7 @@ const c = @cImport({
     @cInclude("agent_state.h");
     @cInclude("agent_events.h");
     @cInclude("ghostty/vt.h");
+    @cInclude("raylib.h");
 });
 
 export fn tab_display_title(t: *const c.Tab, tab_index_one_based: usize, out: [*c]u8, outsz: usize) void {
@@ -37,104 +38,6 @@ export fn tab_display_title(t: *const c.Tab, tab_index_one_based: usize, out: [*
     }
     _ = tab_index_one_based;
     if (outsz > 0) out[0] = 0;
-}
-
-export fn tab_splitter_hit(mpos: c.Vector2, strip_w: c_int, scr_h: c_int) bool {
-    _ = scr_h;
-    return mpos.x >= @as(f32, @floatFromInt(strip_w)) and
-        mpos.x <= @as(f32, @floatFromInt(strip_w + 8));
-}
-
-export fn tab_splitter_toggle_hit(mpos: c.Vector2, effective_strip_w: c_int, scr_h: c_int) bool {
-    _ = scr_h;
-    _ = mpos;
-    _ = effective_strip_w;
-    return false;
-}
-
-export fn tab_strip_hit(
-    mpos: c.Vector2,
-    strip_w: c_int,
-    scr_h: c_int,
-    n_tabs: usize,
-    idx: *usize,
-    act: *c_int,
-    tab_title_h: c_int,
-    tab_reserved_h: c_int,
-    strip_collapsed: bool,
-) bool {
-    _ = idx;
-    _ = act;
-    _ = strip_w;
-    _ = scr_h;
-    _ = n_tabs;
-    _ = tab_title_h;
-    _ = tab_reserved_h;
-    _ = strip_collapsed;
-    _ = mpos;
-    return false;
-}
-
-export fn tab_strip_draw(
-    font: c.Font,
-    font_size: f32,
-    strip_w: c_int,
-    scr_h: c_int,
-    tabs: [*c]?*c.Tab,
-    n_tabs: usize,
-    active_idx: usize,
-    edit_idx: usize,
-    edit_buf: [*c]const u8,
-    strip_bg: c.Color,
-    tab_index_bg: c.Color,
-    tab_reserved_bg: c.Color,
-    tab_bg: c.Color,
-    tab_active: c.Color,
-    border: c.Color,
-    fg: c.Color,
-    edit_bg: c.Color,
-    tab_title_h: c_int,
-    tab_reserved_h: c_int,
-    strip_collapsed: bool,
-) void {
-    _ = font;
-    _ = font_size;
-    _ = strip_w;
-    _ = scr_h;
-    _ = tabs;
-    _ = n_tabs;
-    _ = active_idx;
-    _ = edit_idx;
-    _ = edit_buf;
-    _ = strip_bg;
-    _ = tab_index_bg;
-    _ = tab_reserved_bg;
-    _ = tab_bg;
-    _ = tab_active;
-    _ = border;
-    _ = fg;
-    _ = edit_bg;
-    _ = tab_title_h;
-    _ = tab_reserved_h;
-    _ = strip_collapsed;
-}
-
-export fn tab_splitter_toggle_draw(
-    font: c.Font,
-    font_size: f32,
-    strip_w: c_int,
-    scr_h: c_int,
-    strip_collapsed: bool,
-    show: bool,
-    fg: c.Color,
-) void {
-    _ = font;
-    _ = font_size;
-    _ = strip_w;
-    _ = scr_h;
-    _ = strip_collapsed;
-    _ = show;
-    _ = fg;
 }
 
 export fn tab_init_struct(t: *c.Tab) void {

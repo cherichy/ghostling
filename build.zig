@@ -67,10 +67,12 @@ pub fn build(b: *std.Build) void {
         "src/c/pty_common.c",
         "src/c/pty_win.c",
         "src/c/terminal_ui.c",
+        "src/c/tab_ui.c",
     } else &.{
         "src/c/pty_common.c",
         "src/c/pty_unix.c",
         "src/c/terminal_ui.c",
+        "src/c/tab_ui.c",
     };
     const c_flags: []const []const u8 = if (target.result.os.tag == .linux)
         &.{ "-std=c11", "-D_DEFAULT_SOURCE" }
