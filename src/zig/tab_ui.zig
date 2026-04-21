@@ -210,9 +210,6 @@ export fn tab_strip_draw(
     const new_y0 = scr_h - 44;
     const max_vis = if (new_y0 > 0) @as(usize, @intCast(@divTrunc(new_y0, row_h))) else 1;
 
-    const label_max_w = @as(f32, @floatFromInt(strip_w - ix - close_w - 10));
-    const lmw = if (label_max_w < 20.0) 20.0 else label_max_w;
-
     var i: usize = 0;
     while (i < n_tabs and i < max_vis) : (i += 1) {
         const y0 = @as(c_int, @intCast(i * @as(usize, @intCast(row_h))));
@@ -244,19 +241,20 @@ export fn tab_strip_draw(
         }
 
         var title_buf: [256]u8 = undefined;
-        rl.tab_display_title(tab_ptr, i + 1, &title_buf, title_buf.len);
+        rl.tab_display_title(tab_ptr, i + 1, &title_buf, @as(c_int, title_buf.len));
 
-        var line_buf: [512]u8 = undefined;
-        truncateToWidth(font, qfont, @as([*c]const u8, @ptrCast(&title_buf)), lmw, &line_buf, line_buf.len);
-
-        const ts = rl.MeasureTextEx(font, &line_buf, qfont, 0);
+        const title_slice = std.mem.sliceTo(&title_buf, 0);
+        const title_text = if (title_slice.len > 0) title_slice else "?";
+        const ts = rl.MeasureTextEx(font, @as([*c]const u8, @ptrCast(title_text.ptr)), qfont, 0);
         const tx = @as(f32, @floatFromInt(ix)) + 6.0;
         const ty = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(title_h)) - ts.y) * 0.5;
-        rl.DrawTextEx(font, &line_buf, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
+        rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(title_text.ptr)), .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
 
         if (reserved_h > 0) {
             const agent_label = rl.ghostling_agent_state_label(&tab_ptr.agent_state);
-            rl.DrawTextEx(font, agent_label, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(@as(f32, @floatFromInt(y_res)) + (@as(f32, @floatFromInt(reserved_h)) - rl.MeasureTextEx(font, agent_label, qfont, 0).y) * 0.5, dpi_scale.y) }, qfont, 0, fg);
+            const als = rl.MeasureTextEx(font, agent_label, qfont, 0);
+            const ay = @as(f32, @floatFromInt(y_res)) + (@as(f32, @floatFromInt(reserved_h)) - als.y) * 0.5;
+            rl.DrawTextEx(font, agent_label, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ay, dpi_scale.y) }, qfont, 0, fg);
         }
 
         const x_str = "×";
