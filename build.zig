@@ -61,16 +61,12 @@ pub fn build(b: *std.Build) void {
     c_mod.addIncludePath(font_jbh.dirname());
 
     const c_files: []const []const u8 = if (target.result.os.tag == .windows) &.{
-        "src/c/agent_state.c",
-        "src/c/agent_state_test.c",
         "src/c/main.c",
         "src/c/pty_common.c",
         "src/c/pty_win.c",
         "src/c/config_font.c",
         "src/c/effects.c",
     } else &.{
-        "src/c/agent_state.c",
-        "src/c/agent_state_test.c",
         "src/c/main.c",
         "src/c/pty_common.c",
         "src/c/pty_unix.c",
@@ -114,6 +110,18 @@ pub fn build(b: *std.Build) void {
         .root_module = agent_events_mod,
     });
 
+    const agent_state_mod = b.createModule(.{
+        .root_source_file = b.path("src/zig/agent_state.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    agent_state_mod.addIncludePath(ghostty_dep.path("include"));
+    agent_state_mod.addIncludePath(b.path("src/c"));
+    const agent_state_obj = b.addObject(.{
+        .name = "agent_state",
+        .root_module = agent_state_mod,
+    });
+
     const ghostling = b.addExecutable(.{
         .name = "ghostling",
         .root_module = c_mod,
@@ -124,6 +132,7 @@ pub fn build(b: *std.Build) void {
     ghostling.linkLibrary(ghostty_vt);
     ghostling.addObject(osc52_obj);
     ghostling.addObject(agent_events_obj);
+    ghostling.addObject(agent_state_obj);
 
     const win_gnu = target.result.os.tag == .windows and target.result.abi == .gnu;
     const raylib_loc = raylib_prefix.len > 0 or raylib_lib.len > 0;
