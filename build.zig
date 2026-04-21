@@ -1,9 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-/// MSYS2 UCRT64 ships both `libraylib.a` (static) and `libraylib.dll.a` (import lib for `raylib.dll`).
-/// `linkSystemLibrary("raylib")` / dropping `libraylib.a` on the link line often still resolves to the
-/// **static** archive first. Link the `.dll.a` stubs explicitly so the exe depends on `raylib.dll` + `glfw3.dll`.
 fn linkRaylibGlfwMingwDllImports(b: *std.Build, compile: *std.Build.Step.Compile, lib_dir: []const u8) void {
     compile.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ lib_dir, "libraylib.dll.a" }) });
     compile.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ lib_dir, "libglfw3.dll.a" }) });
@@ -16,11 +13,7 @@ pub fn build(b: *std.Build) void {
 
     const target = b.standardTargetOptions(.{ .default_target = default_target });
     const optimize: std.builtin.OptimizeMode = blk: {
-        if (b.option(
-            std.builtin.OptimizeMode,
-            "optimize",
-            "Build mode (default: ReleaseFast; Debug is very slow for Ghostty)",
-        )) |m| break :blk m;
+        if (b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode")) |m| break :blk m;
         break :blk switch (b.release_mode) {
             .off => .ReleaseFast,
             .any => .ReleaseFast,
@@ -30,12 +23,12 @@ pub fn build(b: *std.Build) void {
         };
     };
 
-    const raylib_prefix = b.option([]const u8, "raylib-prefix", "Install root with include/ and lib/ (e.g. MSYS2 UCRT64)") orelse "";
-    const raylib_lib = b.option([]const u8, "raylib-lib", "Path to libraylib.a (directory must also contain libraylib.dll.a for MinGW dynamic link)") orelse "";
-    const raylib_include = b.option([]const u8, "raylib-include", "Directory containing raylib.h (CMake: build/_deps/raylib-src/src)") orelse "";
+    const raylib_prefix = b.option([]const u8, "raylib-prefix", "Install root with include/ and lib/") orelse "";
+    const raylib_lib = b.option([]const u8, "raylib-lib", "Path to libraylib.a") orelse "";
+    const raylib_include = b.option([]const u8, "raylib-include", "Directory containing raylib.h") orelse "";
 
     if (raylib_lib.len > 0 and raylib_include.len == 0 and raylib_prefix.len == 0) {
-        std.debug.panic("-Draylib-lib requires -Draylib-include or -Draylib-prefix (for headers)\n", .{});
+        std.debug.panic("-Draylib-lib requires -Draylib-include or -Draylib-prefix\n", .{});
     }
 
     const ghostty_dep = b.dependency("ghostty", .{
@@ -75,12 +68,7 @@ pub fn build(b: *std.Build) void {
         "src/c/pty_common.c",
         "src/c/pty_win.c",
         "src/c/config_font.c",
-        "src/c/osc52_clipboard.c",
         "src/c/effects.c",
-        "src/c/tab_runtime.c",
-        "src/c/tab_ui.c",
-        "src/c/tabs.c",
-        "src/c/terminal_ui.c",
     } else &.{
         "src/c/agent_events.c",
         "src/c/agent_state.c",
@@ -89,7 +77,6 @@ pub fn build(b: *std.Build) void {
         "src/c/pty_common.c",
         "src/c/pty_unix.c",
         "src/c/config_font.c",
-        "src/c/osc52_clipboard.c",
         "src/c/effects.c",
         "src/c/tab_runtime.c",
         "src/c/tab_ui.c",
@@ -106,6 +93,17 @@ pub fn build(b: *std.Build) void {
         .flags = c_flags,
     });
 
+    const osc52_mod = b.createModule(.{
+        .root_source_file = b.path("src/zig/osc52_clipboard.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    osc52_mod.addIncludePath(ghostty_dep.path("include"));
+    const osc52_obj = b.addObject(.{
+        .name = "osc52_clipboard",
+        .root_module = osc52_mod,
+    });
+
     const ghostling = b.addExecutable(.{
         .name = "ghostling",
         .root_module = c_mod,
@@ -114,6 +112,7 @@ pub fn build(b: *std.Build) void {
     ghostling.linkLibC();
     ghostling.linkLibCpp();
     ghostling.linkLibrary(ghostty_vt);
+    ghostling.addObject(osc52_obj);
 
     const win_gnu = target.result.os.tag == .windows and target.result.abi == .gnu;
     const raylib_loc = raylib_prefix.len > 0 or raylib_lib.len > 0;
@@ -125,8 +124,11 @@ pub fn build(b: *std.Build) void {
             b.pathJoin(&.{ raylib_prefix, "lib" });
         if (raylib_include.len > 0) {
             c_mod.addIncludePath(.{ .cwd_relative = b.dupePath(raylib_include) });
+            osc52_mod.addIncludePath(.{ .cwd_relative = b.dupePath(raylib_include) });
         } else if (raylib_prefix.len > 0) {
-            c_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ raylib_prefix, "include" }) });
+            const rl_inc = b.pathJoin(&.{ raylib_prefix, "include" });
+            c_mod.addIncludePath(.{ .cwd_relative = rl_inc });
+            osc52_mod.addIncludePath(.{ .cwd_relative = rl_inc });
         }
         linkRaylibGlfwMingwDllImports(b, ghostling, lib_dir);
     } else if (raylib_lib.len > 0) {
@@ -134,8 +136,11 @@ pub fn build(b: *std.Build) void {
         ghostling.addLibraryPath(.{ .cwd_relative = b.dupePath(dir) });
         if (raylib_include.len > 0) {
             c_mod.addIncludePath(.{ .cwd_relative = b.dupePath(raylib_include) });
+            osc52_mod.addIncludePath(.{ .cwd_relative = b.dupePath(raylib_include) });
         } else if (raylib_prefix.len > 0) {
-            c_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ raylib_prefix, "include" }) });
+            const rl_inc = b.pathJoin(&.{ raylib_prefix, "include" });
+            c_mod.addIncludePath(.{ .cwd_relative = rl_inc });
+            osc52_mod.addIncludePath(.{ .cwd_relative = rl_inc });
         }
         c_mod.linkSystemLibrary("raylib", .{
             .preferred_link_mode = .dynamic,
@@ -143,8 +148,12 @@ pub fn build(b: *std.Build) void {
         });
     } else {
         if (raylib_prefix.len > 0) {
+            const rl_inc = b.pathJoin(&.{ raylib_prefix, "include" });
             ghostling.addLibraryPath(.{ .cwd_relative = b.pathJoin(&.{ raylib_prefix, "lib" }) });
-            c_mod.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ raylib_prefix, "include" }) });
+            c_mod.addIncludePath(.{ .cwd_relative = rl_inc });
+            osc52_mod.addIncludePath(.{ .cwd_relative = rl_inc });
+        } else if (target.result.os.tag == .macos) {
+            osc52_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
         }
         c_mod.linkSystemLibrary("raylib", .{
             .preferred_link_mode = .dynamic,
