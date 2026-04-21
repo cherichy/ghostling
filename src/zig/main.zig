@@ -20,10 +20,6 @@ const MaxTabs: usize = 16;
 const TabStripWDefault: i32 = 156;
 const TabEditNone: usize = std.math.maxInt(usize);
 
-fn logBuildInfo() void {
-    std.debug.print("ghostling (Zig) -- terminal emulator\n", .{});
-}
-
 fn fileMtimeSeconds(path: [*c]const u8, mtime: *c.time_t) bool {
     var st: c.struct_stat = undefined;
     if (c.stat(@as([*c]const u8, @ptrCast(path)), &st) == 0) {
@@ -66,9 +62,6 @@ fn keyBindingTriggered(binding: *const c.GhostlingKeyBinding, state: *bool) bool
 }
 
 pub fn main() void {
-    logBuildInfo();
-    std.debug.print("1: init raylib\n", .{});
-
     c.SetTraceLogCallback(raylibTraceFilter);
     c.SetConfigFlags(c.FLAG_WINDOW_HIGHDPI);
     c.InitWindow(800, 600, "ghostling");
@@ -76,34 +69,26 @@ pub fn main() void {
     c.SetExitKey(c.KEY_NULL);
     c.SetWindowState(c.FLAG_WINDOW_RESIZABLE);
     c.SetTargetFPS(60);
-    std.debug.print("2: raylib ready\n", .{});
 
     const dpi = c.GetWindowScaleDPI();
-    std.debug.print("3: dpi={d},{d}\n", .{ dpi.x, dpi.y });
 
     var app_cfg: c.AppConfig = undefined;
     c.config_load(&app_cfg);
-    std.debug.print("4: config loaded, font_size={d}\n", .{app_cfg.font_size});
     const font_size = app_cfg.font_size;
 
     var cp_count: c_int = 0;
-    std.debug.print("5: building codepoints...\n", .{});
     const codepoints = c.build_terminal_codepoints(&app_cfg.font_codepoint_set, &cp_count);
-    std.debug.print("5b: codepoints={*} count={d}\n", .{ codepoints, cp_count });
     if (codepoints == null or cp_count <= 0) {
         std.debug.print("ghostling: out of memory building codepoint list\n", .{});
         return;
     }
 
     const font_size_px = @as(c_int, @intFromFloat(@as(f32, @floatFromInt(font_size)) * dpi.y));
-    std.debug.print("6: font_size_px={d}\n", .{font_size_px});
     var mono_font: c.Font = undefined;
     {
         const embed: [*c]const u8 = @as([*c]const u8, &c.font_jetbrains_mono);
         const embed_size: c_int = @as(c_int, @intCast(@sizeOf(@TypeOf(c.font_jetbrains_mono))));
-        std.debug.print("6b: loading font, embed_size={d}\n", .{embed_size});
         mono_font = c.load_terminal_font(&app_cfg.font_path, embed, embed_size, font_size_px, codepoints, cp_count);
-        std.debug.print("6c: font glyphCount={d} texture.id={d}\n", .{ mono_font.glyphCount, mono_font.texture.id });
     }
     if (mono_font.glyphCount <= 0 or mono_font.texture.id <= 0) {
         std.debug.print("ghostling: failed to load font\n", .{});
@@ -139,10 +124,7 @@ pub fn main() void {
     layoutTerminals(scr_w, scr_h, tab_strip_w, tab_strip_collapsed, cell_width, cell_height, pad, &term_cols, &term_rows, &grid_origin_x, &grid_origin_y);
 
     tab_ptrs[0] = &tabs[0];
-    std.debug.print("7: starting shell...\n", .{});
-    const shell_ok = c.tab_start_shell(&tabs[0], term_cols, term_rows, cell_width, cell_height, null);
-    std.debug.print("7b: shell_ok={}\n", .{shell_ok});
-    if (!shell_ok) {
+    if (!c.tab_start_shell(&tabs[0], term_cols, term_rows, cell_width, cell_height, null)) {
         std.debug.print("ghostling: failed to start shell\n", .{});
         return;
     }
@@ -319,7 +301,7 @@ pub fn main() void {
         c.ClearBackground(c.BLACK);
         {
             _ = c.ghostty_render_state_update(render_state, cur_tab.terminal);
-            var dirty: bool = false;
+            var dirty: c_int = 0;
             _ = c.ghostty_render_state_get(render_state, c.GHOSTTY_RENDER_STATE_DATA_DIRTY, &dirty);
             var scrollbar: c.GhosttyTerminalScrollbar = undefined;
             _ = c.ghostty_terminal_get(cur_tab.terminal, c.GHOSTTY_TERMINAL_DATA_SCROLLBAR, &scrollbar);
