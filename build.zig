@@ -64,13 +64,10 @@ pub fn build(b: *std.Build) void {
     }
 
     const c_files: []const []const u8 = if (target.result.os.tag == .windows) &.{
-        "src/c/pty_common.c",
         "src/c/pty_win.c",
         "src/c/terminal_ui.c",
         "src/c/tab_ui.c",
     } else &.{
-        "src/c/pty_common.c",
-        "src/c/pty_unix.c",
         "src/c/terminal_ui.c",
         "src/c/tab_ui.c",
     };
@@ -161,6 +158,17 @@ pub fn build(b: *std.Build) void {
         .root_module = tab_runtime_mod,
     });
 
+    const pty_mod = b.createModule(.{
+        .root_source_file = b.path("src/zig/pty.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    pty_mod.addIncludePath(b.path("src/c"));
+    const pty_obj = b.addObject(.{
+        .name = "pty",
+        .root_module = pty_mod,
+    });
+
     const ghostling = b.addExecutable(.{
         .name = "ghostling",
         .root_module = c_mod,
@@ -175,6 +183,7 @@ pub fn build(b: *std.Build) void {
     ghostling.addObject(effects_obj);
     ghostling.addObject(config_font_obj);
     ghostling.addObject(tab_runtime_obj);
+    ghostling.addObject(pty_obj);
 
     const win_gnu = target.result.os.tag == .windows and target.result.abi == .gnu;
     const raylib_loc = raylib_prefix.len > 0 or raylib_lib.len > 0;
