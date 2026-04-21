@@ -305,7 +305,7 @@ pub fn main() void {
             _ = c.ghostty_render_state_get(render_state, c.GHOSTTY_RENDER_STATE_DATA_DIRTY, &dirty);
             var scrollbar: c.GhosttyTerminalScrollbar = undefined;
             _ = c.ghostty_terminal_get(cur_tab.terminal, c.GHOSTTY_TERMINAL_DATA_SCROLLBAR, &scrollbar);
-            _ = c.render_terminal(render_state, row_iter, row_cells, mono_font, cur_tab.effects.cell_width, cur_tab.effects.cell_height, font_size_px, &scrollbar, grid_origin_x, grid_origin_y, cur_tab.effects.rows, 0, false, 0, 0, 0, 0, 0);
+            _ = c.render_terminal(render_state, row_iter, row_cells, mono_font, cur_tab.effects.cell_width, cur_tab.effects.cell_height, font_size, &scrollbar, grid_origin_x, grid_origin_y, cur_tab.effects.rows, 0, false, 0, 0, 0, 0, 0);
         }
         {
             const tab_title_font_px = @as(f32, @floatFromInt(font_size)) * app_cfg.tab_title_font_scale;
