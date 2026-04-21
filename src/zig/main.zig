@@ -307,6 +307,20 @@ pub fn main() void {
             _ = c.ghostty_terminal_get(cur_tab.terminal, c.GHOSTTY_TERMINAL_DATA_SCROLLBAR, &scrollbar);
             _ = c.render_terminal(render_state, row_iter, row_cells, mono_font, cur_tab.effects.cell_width, cur_tab.effects.cell_height, font_size_px, &scrollbar, grid_origin_x, grid_origin_y, cur_tab.effects.rows, 0, false, 0, 0, 0, 0, 0);
         }
+        {
+            const tab_title_font_px = @as(f32, @floatFromInt(font_size)) * app_cfg.tab_title_font_scale;
+            const strip_bg = c.Color{ .r = 30, .g = 30, .b = 30, .a = 255 };
+            const tab_index_bg = c.Color{ .r = 40, .g = 40, .b = 40, .a = 255 };
+            const tab_reserved_bg = c.Color{ .r = 35, .g = 35, .b = 35, .a = 255 };
+            const tab_bg = c.Color{ .r = 45, .g = 45, .b = 45, .a = 255 };
+            const tab_active = c.Color{ .r = 55, .g = 55, .b = 55, .a = 255 };
+            const border = c.Color{ .r = 60, .g = 60, .b = 60, .a = 255 };
+            const tab_fg = c.Color{ .r = 200, .g = 200, .b = 200, .a = 255 };
+            const edit_bg = c.Color{ .r = 60, .g = 60, .b = 120, .a = 255 };
+            const effective_w: c_int = if (tab_strip_collapsed) 0 else tab_strip_w;
+            c.tab_strip_draw(mono_font, tab_title_font_px, effective_w, scr_h, &tab_ptrs, n_tabs, active, TabEditNone, null, strip_bg, tab_index_bg, tab_reserved_bg, tab_bg, tab_active, border, tab_fg, edit_bg, app_cfg.tab_title_h, app_cfg.tab_reserved_h, tab_strip_collapsed);
+            c.tab_splitter_toggle_draw(mono_font, tab_title_font_px, tab_strip_w, scr_h, tab_strip_collapsed, false, tab_fg);
+        }
         c.EndDrawing();
     }
 }
