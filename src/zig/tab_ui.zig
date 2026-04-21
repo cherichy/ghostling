@@ -240,15 +240,16 @@ export fn tab_strip_draw(
             rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(num_slice.ptr)), num_pos, qfont, 0, fg);
         }
 
-        var title_buf: [256]u8 = undefined;
-        rl.tab_display_title(tab_ptr, i + 1, &title_buf, @as(c_int, title_buf.len));
+        var title_buf: [256]u8 = [_]u8{0} ** 256;
+        rl.tab_display_title(tab_ptr, i + 1, &title_buf, title_buf.len);
 
-        const title_slice = std.mem.sliceTo(&title_buf, 0);
-        const title_text = if (title_slice.len > 0) title_slice else "?";
-        const ts = rl.MeasureTextEx(font, @as([*c]const u8, @ptrCast(title_text.ptr)), qfont, 0);
+        if (title_buf[0] == 0) {
+            _ = rl.snprintf(&title_buf, title_buf.len, "tab %zu", i + 1);
+        }
+        const ts = rl.MeasureTextEx(font, &title_buf, qfont, 0);
         const tx = @as(f32, @floatFromInt(ix)) + 6.0;
         const ty = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(title_h)) - ts.y) * 0.5;
-        rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(title_text.ptr)), .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
+        rl.DrawTextEx(font, &title_buf, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
 
         if (reserved_h > 0) {
             const agent_label = rl.ghostling_agent_state_label(&tab_ptr.agent_state);
