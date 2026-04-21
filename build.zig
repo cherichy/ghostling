@@ -52,21 +52,22 @@ pub fn build(b: *std.Build) void {
     gen_font_h.addArg("font_jetbrains_mono");
 
     const c_mod = b.createModule(.{
-        .root_source_file = null,
+        .root_source_file = b.path("src/zig/main.zig"),
         .target = target,
         .optimize = optimize,
     });
     c_mod.addIncludePath(ghostty_dep.path("include"));
     c_mod.addIncludePath(b.path("src/c"));
     c_mod.addIncludePath(font_jbh.dirname());
+    if (target.result.os.tag == .macos) {
+        c_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    }
 
     const c_files: []const []const u8 = if (target.result.os.tag == .windows) &.{
-        "src/c/main.c",
         "src/c/pty_common.c",
         "src/c/pty_win.c",
         "src/c/terminal_ui.c",
     } else &.{
-        "src/c/main.c",
         "src/c/pty_common.c",
         "src/c/pty_unix.c",
         "src/c/terminal_ui.c",
