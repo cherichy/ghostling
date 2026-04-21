@@ -151,11 +151,15 @@ pub fn main() void {
     var row_cells: c.GhosttyRenderStateRowCells = null;
     var mouse_encoder: c.GhosttyMouseEncoder = null;
     var mouse_event: c.GhosttyMouseEvent = null;
+    var key_encoder: c.GhosttyKeyEncoder = null;
+    var key_event: c.GhosttyKeyEvent = null;
     _ = c.ghostty_render_state_new(null, &render_state);
     _ = c.ghostty_render_state_row_iterator_new(null, &row_iter);
     _ = c.ghostty_render_state_row_cells_new(null, &row_cells);
     _ = c.ghostty_mouse_encoder_new(null, &mouse_encoder);
     _ = c.ghostty_mouse_event_new(null, &mouse_event);
+    _ = c.ghostty_key_encoder_new(null, &key_encoder);
+    _ = c.ghostty_key_event_new(null, &key_event);
 
     var last_tab_click_t: f64 = -100.0;
     _ = &last_tab_click_t;
@@ -295,7 +299,7 @@ pub fn main() void {
             _ = c.handle_mouse(cur_tab.pty_fd, mouse_encoder, mouse_event, cur_tab.terminal, cur_tab.effects.cell_width, cur_tab.effects.cell_height, grid_origin_x, grid_origin_y, 0, 0, scr_w, scr_h);
         }
 
-        _ = c.handle_input(cur_tab.pty_fd, null, null, cur_tab.terminal);
+        _ = c.handle_input(cur_tab.pty_fd, key_encoder, key_event, cur_tab.terminal);
 
         c.BeginDrawing();
         c.ClearBackground(c.BLACK);

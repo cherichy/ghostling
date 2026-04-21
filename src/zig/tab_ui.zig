@@ -3,6 +3,7 @@ const std = @import("std");
 const rl = @cImport({
     @cInclude("raylib.h");
     @cInclude("tabs.h");
+    @cInclude("agent_state.h");
     @cInclude("stdio.h");
 });
 
@@ -189,6 +190,7 @@ export fn tab_strip_draw(
     tab_reserved_h: c_int,
     strip_collapsed: bool,
 ) void {
+    _ = edit_buf;
     if (strip_collapsed) return;
 
     const dpi_scale = currentDpiScale();
@@ -215,6 +217,7 @@ export fn tab_strip_draw(
     while (i < n_tabs and i < max_vis) : (i += 1) {
         const y0 = @as(c_int, @intCast(i * @as(usize, @intCast(row_h))));
         const editing = (edit_idx == i);
+        const tab_ptr = tabs[i] orelse continue;
 
         rl.DrawRectangle(0, y0, ix, row_h, tab_index_bg);
         rl.DrawRectangle(ix - 1, y0, 1, row_h, border);
@@ -228,34 +231,32 @@ export fn tab_strip_draw(
         rl.DrawRectangle(0, y_res + reserved_h - 1, strip_w - 1, 1, border);
 
         var num_buf: [8]u8 = undefined;
-        const num = std.fmt.bufPrint(&num_buf, "{}", .{i + 1}) catch "?";
-        const ns = rl.MeasureTextEx(font, @as([*c]const u8, @ptrCast(num.ptr)), qfont, 0);
+        const num_slice = std.fmt.bufPrint(&num_buf, "{}", .{i + 1}) catch "?";
+        const ns = rl.MeasureTextEx(font, @as([*c]const u8, @ptrCast(num_slice.ptr)), qfont, 0);
         var nx = (@as(f32, @floatFromInt(ix)) - ns.x) * 0.5;
         if (nx < 2.0) nx = 2.0;
         const ny = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(row_h)) - ns.y) * 0.5;
         const num_pos = rl.Vector2{ .x = snapToPhysical(nx, dpi_scale.x), .y = snapToPhysical(ny, dpi_scale.y) };
         if (i == active_idx) {
-            drawTextSyntheticBold(font, @as([*c]const u8, @ptrCast(num.ptr)), num_pos, qfont, fg, dpi_scale);
+            drawTextSyntheticBold(font, @as([*c]const u8, @ptrCast(num_slice.ptr)), num_pos, qfont, fg, dpi_scale);
         } else {
-            rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(num.ptr)), num_pos, qfont, 0, fg);
+            rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(num_slice.ptr)), num_pos, qfont, 0, fg);
         }
+
+        var title_buf: [256]u8 = undefined;
+        rl.tab_display_title(tab_ptr, i + 1, &title_buf, title_buf.len);
 
         var line_buf: [512]u8 = undefined;
-        if (editing and edit_buf != null) {
-            _ = rl.snprintf(&line_buf, line_buf.len, "%s", edit_buf);
-        } else {
-            var raw: [256]u8 = undefined;
-            rl.tab_display_title(tabs[i], i + 1, &raw, raw.len);
-            truncateToWidth(font, qfont, @as([*c]const u8, @ptrCast(&raw)), lmw, @as([*c]u8, @ptrCast(&line_buf)), line_buf.len);
-        }
+        truncateToWidth(font, qfont, @as([*c]const u8, @ptrCast(&title_buf)), lmw, &line_buf, line_buf.len);
 
-        const ts = rl.MeasureTextEx(font, @as([*c]const u8, @ptrCast(&line_buf)), qfont, 0);
+        const ts = rl.MeasureTextEx(font, &line_buf, qfont, 0);
         const tx = @as(f32, @floatFromInt(ix)) + 6.0;
         const ty = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(title_h)) - ts.y) * 0.5;
-        rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(&line_buf)), .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
+        rl.DrawTextEx(font, &line_buf, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
 
         if (reserved_h > 0) {
-            rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(&line_buf)), .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
+            const agent_label = rl.ghostling_agent_state_label(&tab_ptr.agent_state);
+            rl.DrawTextEx(font, agent_label, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(@as(f32, @floatFromInt(y_res)) + (@as(f32, @floatFromInt(reserved_h)) - rl.MeasureTextEx(font, agent_label, qfont, 0).y) * 0.5, dpi_scale.y) }, qfont, 0, fg);
         }
 
         const x_str = "×";
