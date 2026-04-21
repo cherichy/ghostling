@@ -167,11 +167,13 @@ pub fn main() void {
     var render_state: c.GhosttyRenderState = null;
     var row_iter: c.GhosttyRenderStateRowIterator = null;
     var row_cells: c.GhosttyRenderStateRowCells = null;
-    std.debug.print("8: creating render state...\n", .{});
+    var mouse_encoder: c.GhosttyMouseEncoder = null;
+    var mouse_event: c.GhosttyMouseEvent = null;
     _ = c.ghostty_render_state_new(null, &render_state);
     _ = c.ghostty_render_state_row_iterator_new(null, &row_iter);
     _ = c.ghostty_render_state_row_cells_new(null, &row_cells);
-    std.debug.print("8b: render_state={*} row_iter={*} row_cells={*}\n", .{ render_state, row_iter, row_cells });
+    _ = c.ghostty_mouse_encoder_new(null, &mouse_encoder);
+    _ = c.ghostty_mouse_event_new(null, &mouse_event);
 
     var last_tab_click_t: f64 = -100.0;
     _ = &last_tab_click_t;
@@ -308,7 +310,7 @@ pub fn main() void {
         }
 
         if (!mouse_handled) {
-            _ = c.handle_mouse(cur_tab.pty_fd, null, null, cur_tab.terminal, cur_tab.effects.cell_width, cur_tab.effects.cell_height, grid_origin_x, grid_origin_y, 0, 0, scr_w, scr_h);
+            _ = c.handle_mouse(cur_tab.pty_fd, mouse_encoder, mouse_event, cur_tab.terminal, cur_tab.effects.cell_width, cur_tab.effects.cell_height, grid_origin_x, grid_origin_y, 0, 0, scr_w, scr_h);
         }
 
         _ = c.handle_input(cur_tab.pty_fd, null, null, cur_tab.terminal);
