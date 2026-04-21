@@ -66,8 +66,10 @@ pub fn build(b: *std.Build) void {
     const c_files: []const []const u8 = if (target.result.os.tag == .windows) &.{
         "src/c/pty_win.c",
         "src/c/terminal_ui.c",
+        "src/c/tab_ui.c",
     } else &.{
         "src/c/terminal_ui.c",
+        "src/c/tab_ui.c",
     };
     const c_flags: []const []const u8 = if (target.result.os.tag == .linux)
         &.{ "-std=c11", "-D_DEFAULT_SOURCE" }
@@ -167,21 +169,6 @@ pub fn build(b: *std.Build) void {
         .root_module = pty_mod,
     });
 
-    const tab_ui_mod = b.createModule(.{
-        .root_source_file = b.path("src/zig/tab_ui.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    tab_ui_mod.addIncludePath(ghostty_dep.path("include"));
-    tab_ui_mod.addIncludePath(b.path("src/c"));
-    if (target.result.os.tag == .macos) {
-        tab_ui_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
-    }
-    const tab_ui_obj = b.addObject(.{
-        .name = "tab_ui",
-        .root_module = tab_ui_mod,
-    });
-
     const ghostling = b.addExecutable(.{
         .name = "ghostling",
         .root_module = c_mod,
@@ -197,8 +184,6 @@ pub fn build(b: *std.Build) void {
     ghostling.addObject(config_font_obj);
     ghostling.addObject(tab_runtime_obj);
     ghostling.addObject(pty_obj);
-    ghostling.addObject(tab_ui_obj);
-
     const win_gnu = target.result.os.tag == .windows and target.result.abi == .gnu;
     const raylib_loc = raylib_prefix.len > 0 or raylib_lib.len > 0;
 
