@@ -65,13 +65,11 @@ pub fn build(b: *std.Build) void {
         "src/c/pty_common.c",
         "src/c/pty_win.c",
         "src/c/config_font.c",
-        "src/c/effects.c",
     } else &.{
         "src/c/main.c",
         "src/c/pty_common.c",
         "src/c/pty_unix.c",
         "src/c/config_font.c",
-        "src/c/effects.c",
         "src/c/tab_runtime.c",
         "src/c/tab_ui.c",
         "src/c/tabs.c",
@@ -122,6 +120,18 @@ pub fn build(b: *std.Build) void {
         .root_module = agent_state_mod,
     });
 
+    const effects_mod = b.createModule(.{
+        .root_source_file = b.path("src/zig/effects.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    effects_mod.addIncludePath(ghostty_dep.path("include"));
+    effects_mod.addIncludePath(b.path("src/c"));
+    const effects_obj = b.addObject(.{
+        .name = "effects",
+        .root_module = effects_mod,
+    });
+
     const ghostling = b.addExecutable(.{
         .name = "ghostling",
         .root_module = c_mod,
@@ -133,6 +143,7 @@ pub fn build(b: *std.Build) void {
     ghostling.addObject(osc52_obj);
     ghostling.addObject(agent_events_obj);
     ghostling.addObject(agent_state_obj);
+    ghostling.addObject(effects_obj);
 
     const win_gnu = target.result.os.tag == .windows and target.result.abi == .gnu;
     const raylib_loc = raylib_prefix.len > 0 or raylib_lib.len > 0;
