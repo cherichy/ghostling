@@ -13,6 +13,19 @@ const TAB_NEW_H: c_int = 44;
 const TAB_CLOSE_W: c_int = 28;
 const TAB_INDEX_COL_W: c_int = 28;
 
+const TabPalette = struct {
+    strip_bg: rl.Color = .{ .r = 45, .g = 45, .b = 48, .a = 255 },
+    index_bg: rl.Color = .{ .r = 40, .g = 40, .b = 44, .a = 255 },
+    reserved_bg: rl.Color = .{ .r = 38, .g = 38, .b = 42, .a = 255 },
+    tab_bg: rl.Color = .{ .r = 55, .g = 55, .b = 58, .a = 255 },
+    active_bg: rl.Color = .{ .r = 70, .g = 100, .b = 140, .a = 255 },
+    border: rl.Color = .{ .r = 80, .g = 80, .b = 85, .a = 255 },
+    fg: rl.Color = .{ .r = 220, .g = 220, .b = 220, .a = 255 },
+    edit_bg: rl.Color = .{ .r = 50, .g = 70, .b = 95, .a = 255 },
+};
+
+const palette = TabPalette{};
+
 fn clampScale(scale: f32) f32 {
     return if (scale > 0.0) scale else 1.0;
 }
@@ -212,19 +225,10 @@ export fn tab_strip_draw(
 
     if (strip_collapsed) return;
 
-    const fixed_strip_bg = rl.Color{ .r = 45, .g = 45, .b = 48, .a = 255 };
-    const fixed_tab_index_bg = rl.Color{ .r = 40, .g = 40, .b = 44, .a = 255 };
-    const fixed_tab_reserved_bg = rl.Color{ .r = 38, .g = 38, .b = 42, .a = 255 };
-    const fixed_tab_bg = rl.Color{ .r = 55, .g = 55, .b = 58, .a = 255 };
-    const fixed_tab_active = rl.Color{ .r = 70, .g = 100, .b = 140, .a = 255 };
-    const fixed_border = rl.Color{ .r = 80, .g = 80, .b = 85, .a = 255 };
-    const fixed_fg = rl.Color{ .r = 220, .g = 220, .b = 220, .a = 255 };
-    const fixed_edit_bg = rl.Color{ .r = 50, .g = 70, .b = 95, .a = 255 };
-
     // Keep an unmistakable base layer so tab strip rendering failures are visible.
     // This also avoids a visually "black" strip when per-tab drawing is skipped.
-    rl.DrawRectangle(0, 0, strip_w, scr_h, fixed_strip_bg);
-    rl.DrawRectangle(strip_w - 1, 0, 1, scr_h, fixed_border);
+    rl.DrawRectangle(0, 0, strip_w, scr_h, palette.strip_bg);
+    rl.DrawRectangle(strip_w - 1, 0, 1, scr_h, palette.border);
 
     const dpi_scale = currentDpiScale();
     const text_font = if (font_size > 0.0) font_size else 12.0;
@@ -252,16 +256,16 @@ export fn tab_strip_draw(
         const tab_ptr = tabs[i];
         if (tab_ptr == null) continue;
 
-        rl.DrawRectangle(0, y0, ix, row_h, fixed_tab_index_bg);
-        rl.DrawRectangle(ix - 1, y0, 1, row_h, fixed_border);
+        rl.DrawRectangle(0, y0, ix, row_h, palette.index_bg);
+        rl.DrawRectangle(ix - 1, y0, 1, row_h, palette.border);
 
-        const title_bg = if (editing) fixed_edit_bg else if (i == active_idx) fixed_tab_active else fixed_tab_bg;
+        const title_bg = if (editing) palette.edit_bg else if (i == active_idx) palette.active_bg else palette.tab_bg;
         rl.DrawRectangle(ix, y0, strip_w - ix - 1, title_h, title_bg);
 
         const y_res = y0 + title_h;
-        rl.DrawRectangle(ix, y_res, strip_w - ix - 1, reserved_h, fixed_tab_reserved_bg);
-        rl.DrawRectangle(ix, y0 + title_h - 1, strip_w - ix - 1, 1, fixed_border);
-        rl.DrawRectangle(0, y_res + reserved_h - 1, strip_w - 1, 1, fixed_border);
+        rl.DrawRectangle(ix, y_res, strip_w - ix - 1, reserved_h, palette.reserved_bg);
+        rl.DrawRectangle(ix, y0 + title_h - 1, strip_w - ix - 1, 1, palette.border);
+        rl.DrawRectangle(0, y_res + reserved_h - 1, strip_w - 1, 1, palette.border);
 
         // Tab index number
         var num_buf: [8]u8 = std.mem.zeroes([8]u8);
@@ -273,9 +277,9 @@ export fn tab_strip_draw(
         const ny = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(row_h)) - ns.y) * 0.5;
         const num_pos = rl.Vector2{ .x = snapToPhysical(nx, dpi_scale.x), .y = snapToPhysical(ny, dpi_scale.y) };
         if (i == active_idx) {
-            drawTextSyntheticBold(font.*, num_ptr, num_pos, text_font, fixed_fg, dpi_scale);
+            drawTextSyntheticBold(font.*, num_ptr, num_pos, text_font, palette.fg, dpi_scale);
         } else {
-            drawText(font, num_ptr, num_pos, text_font, fixed_fg);
+            drawText(font, num_ptr, num_pos, text_font, palette.fg);
         }
 
         // Tab title
@@ -293,7 +297,7 @@ export fn tab_strip_draw(
         const tx = @as(f32, @floatFromInt(ix)) + 6.0;
         const ty = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(title_h)) - ts.y) * 0.5;
         const title_pos = rl.Vector2{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) };
-        drawText(font, line_ptr, title_pos, text_font, fixed_fg);
+        drawText(font, line_ptr, title_pos, text_font, palette.fg);
 
         // Agent status in reserved area
         if (reserved_h > 0) {
@@ -313,7 +317,7 @@ export fn tab_strip_draw(
             const ss = measureText(font, status_ptr, text_font);
             const sy = @as(f32, @floatFromInt(y_res)) + (@as(f32, @floatFromInt(reserved_h)) - ss.y) * 0.5;
             const status_pos = rl.Vector2{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(sy, dpi_scale.y) };
-            drawText(font, status_ptr, status_pos, text_font, fixed_fg);
+            drawText(font, status_ptr, status_pos, text_font, palette.fg);
         }
 
         // Close button
@@ -323,12 +327,12 @@ export fn tab_strip_draw(
         const cx = @as(f32, @floatFromInt(strip_w - @as(c_int, @intCast(TAB_CLOSE_W)))) + ((@as(f32, @floatFromInt(@as(c_int, @intCast(TAB_CLOSE_W)))) - xs.x) * 0.5);
         const close_x = @as(c_int, @intFromFloat(snapToPhysical(cx, dpi_scale.x)));
         const close_y = @as(c_int, @intFromFloat(snapToPhysical(@as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(title_h)) - xs.y) * 0.5, dpi_scale.y)));
-        drawText(font, x_str, .{ .x = @floatFromInt(close_x), .y = @floatFromInt(close_y) }, @floatFromInt(x_font_size), fixed_fg);
+        drawText(font, x_str, .{ .x = @floatFromInt(close_x), .y = @floatFromInt(close_y) }, @floatFromInt(x_font_size), palette.fg);
     }
 
     // New tab button
-    rl.DrawRectangle(0, new_y0, strip_w - 1, TAB_NEW_H, fixed_tab_bg);
-    rl.DrawRectangle(0, new_y0, strip_w - 1, 1, fixed_border);
+    rl.DrawRectangle(0, new_y0, strip_w - 1, TAB_NEW_H, palette.tab_bg);
+    rl.DrawRectangle(0, new_y0, strip_w - 1, 1, palette.border);
     const plus: [*c]const u8 = "+";
     const icon_font = quantizeFontSize(iconFontSize(text_font), dpi_scale.y);
     const ps = measureText(font, plus, icon_font);
@@ -336,7 +340,7 @@ export fn tab_strip_draw(
         .x = snapToPhysical((@as(f32, @floatFromInt(strip_w)) - ps.x) * 0.5, dpi_scale.x),
         .y = snapToPhysical(@as(f32, @floatFromInt(new_y0)) + (@as(f32, @floatFromInt(TAB_NEW_H)) - ps.y) * 0.5, dpi_scale.y),
     };
-    drawTextSyntheticBold(font.*, plus, plus_pos, icon_font, fixed_fg, dpi_scale);
+    drawTextSyntheticBold(font.*, plus, plus_pos, icon_font, palette.fg, dpi_scale);
 }
 
 export fn tab_splitter_toggle_draw(

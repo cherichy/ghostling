@@ -278,6 +278,8 @@ fn parseProfileOverrideKey(full_key: []const u8, profile_name: []u8, real_key: [
 fn configSetDefault(cfg: *c.AppConfig) void {
     cfg.* = std.mem.zeroes(c.AppConfig);
     cfg.font_size = 16;
+    _ = std.mem.copyForwards(u8, cfg.font_path[0..default_font_path.len], default_font_path);
+    cfg.font_path[default_font_path.len] = 0;
     _ = std.mem.copyForwards(u8, &cfg.font_codepoint_set, "full");
     cfg.tab_title_font_scale = 1.0;
     cfg.tab_title_h = 18;
@@ -458,20 +460,31 @@ export fn build_terminal_codepoints(set_name: [*c]const u8, out_count: *c_int) [
 
     var idx: usize = 0;
 
-    // Helper to append a range of codepoints
     const Range = struct {
         fn append(list: []c_int, n: *usize, lo: c_int, hi: c_int) bool {
-            var c2 = lo;
-            while (c2 <= hi) : (c2 += 1) {
+            var cp = lo;
+            while (cp <= hi) : (cp += 1) {
                 if (n.* >= cap) return false;
-                list[n.*] = c2;
+                list[n.*] = cp;
                 n.* += 1;
             }
             return true;
         }
     };
 
-    // Base set shared by all profiles: Latin + symbols + box drawing
+    const appendCodepoints = struct {
+        fn call(list: []c_int, n: *usize, values: [*c]const u32, count: usize) bool {
+            var i: usize = 0;
+            while (i < count) : (i += 1) {
+                if (n.* >= cap) return false;
+                list[n.*] = @intCast(values[i]);
+                n.* += 1;
+            }
+            return true;
+        }
+    }.call;
+
+    // Base set shared by all profiles: Latin + symbols + box drawing.
     _ = Range.append(cp_list, &idx, 0x20, 0x7E);
     _ = Range.append(cp_list, &idx, 0xA0, 0x024F);
     _ = Range.append(cp_list, &idx, 0x0300, 0x036F);
@@ -487,34 +500,19 @@ export fn build_terminal_codepoints(set_name: [*c]const u8, out_count: *c_int) [
     _ = Range.append(cp_list, &idx, 0x25A0, 0x25FF);
     _ = Range.append(cp_list, &idx, 0x2600, 0x26FF);
     _ = Range.append(cp_list, &idx, 0x2700, 0x27BF);
-    // zellij/tmux powerline separators (for example U+E0B0) live in PUA
     _ = Range.append(cp_list, &idx, 0xE0A0, 0xE0D7);
 
     const han_tier = ghostling_han_tier_from_codepoint_set(set_name);
 
     if (han_tier != c.GHOSTLING_HAN_TIER_NONE) {
-        // Han tiers intentionally avoid Hiragana/Katakana and keep Chinese punctuation/fullwidth
         _ = Range.append(cp_list, &idx, 0x3000, 0x303F);
         _ = Range.append(cp_list, &idx, 0xFF00, 0xFFEF);
-
-        for (0..c.ghostling_han_level1_count) |j| {
-            cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level1[j]));
-            idx += 1;
-        }
-        if (han_tier >= c.GHOSTLING_HAN_TIER_6500) {
-            for (0..c.ghostling_han_level2_count) |j| {
-                cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level2[j]));
-                idx += 1;
-            }
-        }
-        if (han_tier >= c.GHOSTLING_HAN_TIER_8105) {
-            for (0..c.ghostling_han_level3_count) |j| {
-                cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level3[j]));
-                idx += 1;
-            }
-        }
+        _ = appendCodepoints(cp_list, &idx, @ptrCast(&c.ghostling_han_level1), c.ghostling_han_level1_count);
+        if (han_tier >= c.GHOSTLING_HAN_TIER_6500)
+            _ = appendCodepoints(cp_list, &idx, @ptrCast(&c.ghostling_han_level2), c.ghostling_han_level2_count);
+        if (han_tier >= c.GHOSTLING_HAN_TIER_8105)
+            _ = appendCodepoints(cp_list, &idx, @ptrCast(&c.ghostling_han_level3), c.ghostling_han_level3_count);
     } else if (!std.mem.eql(u8, name, "latin")) {
-        // Compact/full keep CJK core blocks for Chinese/Japanese/Korean text
         _ = Range.append(cp_list, &idx, 0x3000, 0x30FF);
         _ = Range.append(cp_list, &idx, 0x31F0, 0x31FF);
         _ = Range.append(cp_list, &idx, 0x4E00, 0x9FFF);
@@ -522,7 +520,6 @@ export fn build_terminal_codepoints(set_name: [*c]const u8, out_count: *c_int) [
     }
 
     if (!std.mem.eql(u8, name, "latin")) {
-        // Common Nerd Font icon blocks used by prompts/TUI statuslines
         _ = Range.append(cp_list, &idx, 0xE000, 0xE00A);
         _ = Range.append(cp_list, &idx, 0xE200, 0xE2A9);
         _ = Range.append(cp_list, &idx, 0xE300, 0xE3E3);
@@ -534,14 +531,12 @@ export fn build_terminal_codepoints(set_name: [*c]const u8, out_count: *c_int) [
     }
 
     if (std.mem.eql(u8, name, "full")) {
-        // Full profile keeps all legacy ranges from the previous default
         _ = Range.append(cp_list, &idx, 0x3200, 0x32FF);
         _ = Range.append(cp_list, &idx, 0x3300, 0x33FF);
         _ = Range.append(cp_list, &idx, 0x3400, 0x4DBF);
         _ = Range.append(cp_list, &idx, 0xFE00, 0xFE0F);
         _ = Range.append(cp_list, &idx, 0xFE10, 0xFE1F);
         _ = Range.append(cp_list, &idx, 0xFE30, 0xFE4F);
-        // Supplementary-plane Nerd Font glyphs (material/icon extras)
         _ = Range.append(cp_list, &idx, 0xF0001, 0xF1AF0);
     }
 

@@ -14,6 +14,41 @@ const c = @cImport({
     @cInclude("ctype.h");
 });
 
+const ByteBuffer = struct {
+    ptr: [*c]u8,
+    len: usize,
+    cap: usize,
+
+    fn init(capacity: usize) ?ByteBuffer {
+        const mem = c.malloc(capacity) orelse return null;
+        const ptr: [*c]u8 = @ptrCast(mem);
+        ptr[0] = 0;
+        return .{ .ptr = ptr, .len = 0, .cap = capacity };
+    }
+
+    fn deinit(self: *ByteBuffer) void {
+        c.free(self.ptr);
+        self.ptr = null;
+        self.len = 0;
+        self.cap = 0;
+    }
+
+    fn append(self: *ByteBuffer, src: [*c]const u8, src_len: usize) bool {
+        return appendBytes(&self.ptr, &self.len, &self.cap, src, src_len);
+    }
+
+    fn appendCodepoint(self: *ByteBuffer, cp: u32) bool {
+        return appendUtf8Codepoint(&self.ptr, &self.len, &self.cap, cp);
+    }
+
+    fn trimRightSpaces(self: *ByteBuffer, start: usize) void {
+        while (self.len > start and self.ptr[self.len - 1] == ' ') {
+            self.len -= 1;
+            self.ptr[self.len] = 0;
+        }
+    }
+};
+
 // ============================================================================
 // Helper functions
 // ============================================================================
@@ -909,7 +944,6 @@ export fn render_terminal(
             const italic_offset = if (style.italic) @as(c_int, @intCast(@as(u32, @intCast(font_size)) / 6)) else @as(c_int, 0);
             const draw_x = grid_origin_x + col * cell_width;
 
-            // Get pointer to first element of text array for DrawTextEx
             const text_ptr: [*c]const u8 = @ptrCast(&text[0]);
             c.DrawTextEx(font, text_ptr, .{ .x = @as(f32, @floatFromInt(draw_x + italic_offset)), .y = @as(f32, @floatFromInt(y)) }, @as(f32, @floatFromInt(font_size)), 0, ray_fg);
 
