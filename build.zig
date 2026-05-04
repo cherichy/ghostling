@@ -56,6 +56,18 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const c_import_mod = b.createModule(.{
+        .root_source_file = b.path("src/zig/c.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    c_import_mod.addIncludePath(ghostty_dep.path("include"));
+    c_import_mod.addIncludePath(b.path("src/c"));
+    c_import_mod.addIncludePath(font_jbh.dirname());
+    if (target.result.os.tag == .macos) {
+        c_import_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    }
+    c_mod.addImport("c", c_import_mod);
     c_mod.addIncludePath(ghostty_dep.path("include"));
     c_mod.addIncludePath(b.path("src/c"));
     c_mod.addIncludePath(font_jbh.dirname());
@@ -173,6 +185,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    tab_ui_mod.addImport("c", c_import_mod);
     tab_ui_mod.addIncludePath(ghostty_dep.path("include"));
     tab_ui_mod.addIncludePath(b.path("src/c"));
     if (target.result.os.tag == .macos) {
@@ -181,21 +194,6 @@ pub fn build(b: *std.Build) void {
     const tab_ui_obj = b.addObject(.{
         .name = "tab_ui",
         .root_module = tab_ui_mod,
-    });
-
-    const terminal_ui_mod = b.createModule(.{
-        .root_source_file = b.path("src/zig/terminal_ui.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    terminal_ui_mod.addIncludePath(ghostty_dep.path("include"));
-    terminal_ui_mod.addIncludePath(b.path("src/c"));
-    if (target.result.os.tag == .macos) {
-        terminal_ui_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
-    }
-    const terminal_ui_obj = b.addObject(.{
-        .name = "terminal_ui",
-        .root_module = terminal_ui_mod,
     });
 
     const ghostling = b.addExecutable(.{
@@ -214,7 +212,6 @@ pub fn build(b: *std.Build) void {
     ghostling.addObject(tab_runtime_obj);
     ghostling.addObject(pty_obj);
     ghostling.addObject(tab_ui_obj);
-    ghostling.addObject(terminal_ui_obj);
 
     const win_gnu = target.result.os.tag == .windows and target.result.abi == .gnu;
     const raylib_loc = raylib_prefix.len > 0 or raylib_lib.len > 0;

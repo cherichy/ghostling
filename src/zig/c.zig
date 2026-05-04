@@ -1,0 +1,19 @@
+pub const c = @cImport({
+    @cInclude("raylib.h");
+    @cInclude("ghostty/vt.h");
+    @cInclude("ghostty/vt/render.h");
+    @cInclude("config_font.h");
+    @cInclude("tabs.h");
+    @cInclude("pty_common.h");
+    @cInclude("terminal_ui.h");
+    @cInclude("agent_events.h");
+    @cInclude("agent_state.h");
+    @cInclude("effects.h");
+    @cInclude("font_jetbrains_mono.h");
+    @cInclude("stdio.h");
+    @cInclude("string.h");
+    @cInclude("stdlib.h");
+    @cInclude("spawn.h");
+    @cInclude("ctype.h");
+    @cInclude("sys/stat.h");
+});

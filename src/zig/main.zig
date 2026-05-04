@@ -1,23 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const tab_ui = @import("tab_ui.zig");
+const terminal_ui = @import("terminal_ui.zig");
 
-const c = @cImport({
-    @cInclude("raylib.h");
-    @cInclude("ghostty/vt.h");
-    @cInclude("ghostty/vt/render.h");
-    @cInclude("config_font.h");
-    @cInclude("tabs.h");
-    @cInclude("pty_common.h");
-    @cInclude("terminal_ui.h");
-    @cInclude("agent_events.h");
-    @cInclude("agent_state.h");
-    @cInclude("effects.h");
-    @cInclude("font_jetbrains_mono.h");
-    @cInclude("sys/stat.h");
-    @cInclude("stdio.h");
-    @cInclude("stdlib.h");
-    @cInclude("string.h");
-});
+const c = @import("c").c;
 
 const MaxTabs: usize = 16;
 const TabStripWDefault: c_int = 156;
@@ -285,7 +271,7 @@ fn raylibTraceFilter(logLevel: c_int, text: [*c]const u8, args: [*c]u8) callconv
 
 pub fn main() void {
     c.SetTraceLogCallback(raylibTraceFilter);
-    c.log_build_info();
+    terminal_ui.log_build_info();
 
     var app_cfg: c.AppConfig = undefined;
     c.config_load(&app_cfg);
@@ -606,16 +592,16 @@ pub fn main() void {
         var strip_w_eff = tabStripLayoutW(tab_strip_collapsed, tab_strip_w);
 
         // Set mouse cursor
-        if (c.tab_splitter_toggle_hit(mpos, strip_w_eff, ui_h))
+        if (tab_ui.tab_splitter_toggle_hit(mpos, strip_w_eff, ui_h))
             c.SetMouseCursor(c.MOUSE_CURSOR_POINTING_HAND)
-        else if (!tab_strip_collapsed and c.tab_splitter_hit(mpos, tab_strip_w, ui_h))
+        else if (!tab_strip_collapsed and tab_ui.tab_splitter_hit(mpos, tab_strip_w, ui_h))
             c.SetMouseCursor(c.MOUSE_CURSOR_RESIZE_EW)
         else
             c.SetMouseCursor(c.MOUSE_CURSOR_DEFAULT);
 
         // Handle mouse clicks on tab strip
         if (c.IsMouseButtonPressed(c.MOUSE_BUTTON_LEFT)) {
-            if (c.tab_splitter_toggle_hit(mpos, strip_w_eff, ui_h)) {
+            if (tab_ui.tab_splitter_toggle_hit(mpos, strip_w_eff, ui_h)) {
                 tab_strip_collapsed = !tab_strip_collapsed;
                 clampTabStripW(ui_w, cell_width, pad, &tab_strip_w);
                 layoutTerms(ui_w, ui_h, tabStripLayoutW(tab_strip_collapsed, tab_strip_w), cell_width, cell_height, pad, &term_cols, &term_rows, &grid_origin_x, &grid_origin_y);
@@ -623,13 +609,13 @@ pub fn main() void {
                     c.tab_resize_pty(&tabs[i], term_cols, term_rows, cell_width, cell_height);
                 }
                 splitter_dragging = false;
-            } else if (!tab_strip_collapsed and c.tab_splitter_hit(mpos, tab_strip_w, ui_h)) {
+            } else if (!tab_strip_collapsed and tab_ui.tab_splitter_hit(mpos, tab_strip_w, ui_h)) {
                 splitter_dragging = true;
                 scrollbar_dragging = false;
             } else if (mpos.x < @as(f32, @floatFromInt(strip_w_eff)) and !splitter_dragging) {
                 var hit_idx: usize = 0;
-                var hit_act: c_uint = 0;
-                if (c.tab_strip_hit(mpos, strip_w_eff, ui_h, n_tabs, &hit_idx, &hit_act, app_cfg.tab_title_h, app_cfg.tab_reserved_h, tab_strip_collapsed)) {
+                var hit_act: c_int = 0;
+                if (tab_ui.tab_strip_hit(mpos, strip_w_eff, ui_h, n_tabs, &hit_idx, &hit_act, app_cfg.tab_title_h, app_cfg.tab_reserved_h, tab_strip_collapsed)) {
                     if (hit_act == 0) { // SELECT
                         const now = c.GetTime();
                         if (now - last_tab_click_t < 0.35 and hit_idx == last_tab_click_idx and hit_idx == active) {
@@ -710,7 +696,7 @@ pub fn main() void {
         }
 
         // Handle scrollbar
-        const scrollbar_consumed = c.handle_scrollbar(cur.terminal, render_state, &scrollbar_dragging, grid_origin_x, grid_origin_y, term_rows, cell_height, pad);
+        const scrollbar_consumed = terminal_ui.handle_scrollbar(cur.terminal, render_state, &scrollbar_dragging, grid_origin_x, grid_origin_y, term_rows, cell_height, pad);
         if (scrollbar_consumed or scrollbar_dragging) frame_activity = true;
 
         // Handle terminal input and mouse
@@ -731,11 +717,11 @@ pub fn main() void {
                 var hover_x: u16 = 0;
                 var hover_y: u16 = 0;
                 mouseToCellClamped(mpos, grid_origin_x, grid_origin_y, term_pixel_w, term_pixel_h, cell_width, cell_height, term_cols, term_rows, &hover_x, &hover_y);
-                if (c.cell_has_hyperlink(cur.terminal, hover_x, hover_y))
+                if (terminal_ui.cell_has_hyperlink(cur.terminal, hover_x, hover_y))
                     c.SetMouseCursor(c.MOUSE_CURSOR_POINTING_HAND);
 
                 if (c.IsMouseButtonPressed(c.MOUSE_BUTTON_LEFT) and shortcutPrimaryModifierDown()) {
-                    if (c.open_url_at_cell(cur.terminal, term_cols, term_rows, hover_x, hover_y)) {
+                    if (terminal_ui.open_url_at_cell(cur.terminal, term_cols, term_rows, hover_x, hover_y)) {
                         hyperlink_clicked = true;
                         frame_activity = true;
                     }
@@ -745,7 +731,7 @@ pub fn main() void {
             // Text selection
             if (!hyperlink_clicked and !mouse_tracking and !scrollbar_consumed) {
                 if (c.IsMouseButtonPressed(c.MOUSE_BUTTON_LEFT)) {
-                    if (mouse_in_terminal and !(tab_strip_collapsed and c.tab_splitter_toggle_hit(mpos, 0, ui_h))) {
+                    if (mouse_in_terminal and !(tab_strip_collapsed and tab_ui.tab_splitter_toggle_hit(mpos, 0, ui_h))) {
                         var sel_x: u16 = 0;
                         var sel_y: u16 = 0;
                         mouseToCellClamped(mpos, grid_origin_x, grid_origin_y, term_pixel_w, term_pixel_h, cell_width, cell_height, term_cols, term_rows, &sel_x, &sel_y);
@@ -783,7 +769,7 @@ pub fn main() void {
                         var x1: u16 = 0;
                         var y1: u16 = 0;
                         tabSelectionNormalize(cur, &x0, &y0, &x1, &y1);
-                        if (c.copy_viewport_selection_to_clipboard(cur.terminal, term_cols, term_rows, x0, y0, x1, y1))
+                        if (terminal_ui.copy_viewport_selection_to_clipboard(cur.terminal, term_cols, term_rows, x0, y0, x1, y1))
                             frame_activity = true;
                     }
                 }
@@ -798,7 +784,7 @@ pub fn main() void {
                 var x1: u16 = 0;
                 var y1: u16 = 0;
                 tabSelectionNormalize(cur, &x0, &y0, &x1, &y1);
-                if (c.copy_viewport_selection_to_clipboard(cur.terminal, term_cols, term_rows, x0, y0, x1, y1)) {
+                if (terminal_ui.copy_viewport_selection_to_clipboard(cur.terminal, term_cols, term_rows, x0, y0, x1, y1)) {
                     tabSelectionClear(cur);
                     frame_activity = true;
                 }
@@ -808,7 +794,7 @@ pub fn main() void {
             const paste_triggered = pasteShortcutPressed(app_cfg.paste_shortcut);
             const pasted_shortcut = paste_triggered;
             if (paste_triggered) {
-                if (c.paste_host_clipboard_to_terminal(cur.pty_fd, cur.terminal)) {
+                if (terminal_ui.paste_host_clipboard_to_terminal(cur.pty_fd, cur.terminal)) {
                     c.tab_agent_state_on_local_input(cur);
                     tabSelectionClear(cur);
                     frame_activity = true;
@@ -816,7 +802,7 @@ pub fn main() void {
             }
 
             // Handle keyboard input
-            if (!copied_shortcut and !pasted_shortcut and c.handle_input(cur.pty_fd, key_encoder, key_event, cur.terminal)) {
+            if (!copied_shortcut and !pasted_shortcut and terminal_ui.handle_input(cur.pty_fd, key_encoder, key_event, cur.terminal)) {
                 c.tab_agent_state_on_local_input(cur);
                 frame_activity = true;
             }
@@ -825,9 +811,9 @@ pub fn main() void {
             const mouse_pad_right = ui_w - grid_origin_x - term_pixel_w;
             const mouse_pad_bottom = ui_h - grid_origin_y - term_pixel_h;
             if (focused and !hyperlink_clicked and !scrollbar_consumed and mouse_in_terminal and
-                !(tab_strip_collapsed and c.tab_splitter_toggle_hit(mpos, 0, ui_h)))
+                !(tab_strip_collapsed and tab_ui.tab_splitter_toggle_hit(mpos, 0, ui_h)))
             {
-                if (c.handle_mouse(cur.pty_fd, mouse_encoder, mouse_event, cur.terminal, cell_width, cell_height, grid_origin_x, grid_origin_y, @max(0, mouse_pad_right), @max(0, mouse_pad_bottom), ui_w, ui_h))
+                if (terminal_ui.handle_mouse(cur.pty_fd, mouse_encoder, mouse_event, cur.terminal, cell_width, cell_height, grid_origin_x, grid_origin_y, @max(0, mouse_pad_right), @max(0, mouse_pad_bottom), ui_w, ui_h))
                     frame_activity = true;
             }
         }
@@ -872,16 +858,6 @@ pub fn main() void {
         if (c.ghostty_terminal_get(cur.terminal, c.GHOSTTY_TERMINAL_DATA_SCROLLBAR, &scrollbar) == c.GHOSTTY_SUCCESS)
             scrollbar_ptr = &scrollbar;
 
-        // Tab strip colors
-        const strip_bg = c.Color{ .r = 45, .g = 45, .b = 48, .a = 255 };
-        const tab_index_bg = c.Color{ .r = 40, .g = 40, .b = 44, .a = 255 };
-        const tab_reserved_bg = c.Color{ .r = 38, .g = 38, .b = 42, .a = 255 };
-        const tab_bg = c.Color{ .r = 55, .g = 55, .b = 58, .a = 255 };
-        const tab_active_color = c.Color{ .r = 70, .g = 100, .b = 140, .a = 255 };
-        const border = c.Color{ .r = 80, .g = 80, .b = 85, .a = 255 };
-        const tab_fg = c.Color{ .r = 220, .g = 220, .b = 220, .a = 255 };
-        const edit_bg = c.Color{ .r = 50, .g = 70, .b = 95, .a = 255 };
-
         // Get selection state
         const selection_active = cur.selection_active;
         var sel_x0: u16 = 0;
@@ -893,7 +869,7 @@ pub fn main() void {
         // Render
         c.BeginDrawing();
         c.ClearBackground(win_bg);
-        const missing_han_tier = c.render_terminal(
+        const missing_han_tier = terminal_ui.render_terminal(
             render_state,
             row_iter,
             row_cells,
@@ -916,7 +892,7 @@ pub fn main() void {
 
         // Draw tab strip
         const tab_title_font_px: f32 = @as(f32, @floatFromInt(font_size)) * app_cfg.tab_title_font_scale;
-        c.tab_strip_draw(
+        tab_ui.tab_strip_draw(
             &mono_font,
             if (tab_title_font_px < 6.0) 6.0 else tab_title_font_px,
             tabStripLayoutW(tab_strip_collapsed, tab_strip_w),
@@ -926,34 +902,26 @@ pub fn main() void {
             active,
             edit_tab,
             if (edit_tab != TabEditNone) @as([*c]const u8, @ptrCast(&edit_buf)) else null,
-            strip_bg,
-            tab_index_bg,
-            tab_reserved_bg,
-            tab_bg,
-            tab_active_color,
-            border,
-            tab_fg,
-            edit_bg,
             app_cfg.tab_title_h,
             app_cfg.tab_reserved_h,
             tab_strip_collapsed,
         );
 
         // Draw splitter highlight
-        if (!tab_strip_collapsed and (splitter_dragging or c.tab_splitter_hit(mpos, tab_strip_w, ui_h))) {
+        if (!tab_strip_collapsed and (splitter_dragging or tab_ui.tab_splitter_hit(mpos, tab_strip_w, ui_h))) {
             const sx = tab_strip_w - 1;
             c.DrawRectangle(sx, 0, 2, ui_h, .{ .r = 120, .g = 160, .b = 220, .a = 255 });
         }
 
         // Draw splitter toggle
-        c.tab_splitter_toggle_draw(
+        tab_ui.tab_splitter_toggle_draw(
             &mono_font,
             if (tab_title_font_px < 6.0) 6.0 else tab_title_font_px,
             tabStripLayoutW(tab_strip_collapsed, tab_strip_w),
             ui_h,
             tab_strip_collapsed,
-            c.tab_splitter_toggle_hit(mpos, if (tab_strip_collapsed) @as(c_int, 0) else tab_strip_w, ui_h),
-            tab_fg,
+            tab_ui.tab_splitter_toggle_hit(mpos, if (tab_strip_collapsed) @as(c_int, 0) else tab_strip_w, ui_h),
+            tab_ui.palette.fg,
         );
 
         // Draw exit message banner

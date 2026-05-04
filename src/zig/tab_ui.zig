@@ -1,11 +1,6 @@
 const std = @import("std");
 
-const rl = @cImport({
-    @cInclude("raylib.h");
-    @cInclude("tabs.h");
-    @cInclude("agent_state.h");
-    @cInclude("stdio.h");
-});
+const rl = @import("c").c;
 
 pub const ToggleW: c_int = 22;
 pub const ToggleH: c_int = 28;
@@ -24,7 +19,7 @@ const TabPalette = struct {
     edit_bg: rl.Color = .{ .r = 50, .g = 70, .b = 95, .a = 255 },
 };
 
-const palette = TabPalette{};
+pub const palette = TabPalette{};
 
 fn clampScale(scale: f32) f32 {
     return if (scale > 0.0) scale else 1.0;
@@ -115,13 +110,13 @@ fn collapsedExpandBounds(scr_h: c_int, tx: *c_int, ty: *c_int, tw: *c_int, th: *
     ty.* = @divTrunc(scr_h, 2) - @divTrunc(th.*, 2);
 }
 
-export fn tab_splitter_hit(mpos: rl.Vector2, strip_w: c_int, scr_h: c_int) callconv(.c) bool {
+pub fn tab_splitter_hit(mpos: rl.Vector2, strip_w: c_int, scr_h: c_int) bool {
     _ = scr_h;
     return mpos.x >= @as(f32, @floatFromInt(strip_w)) and
         mpos.x <= @as(f32, @floatFromInt(strip_w + 8));
 }
 
-export fn tab_splitter_toggle_hit(mpos: rl.Vector2, effective_strip_w: c_int, scr_h: c_int) callconv(.c) bool {
+pub fn tab_splitter_toggle_hit(mpos: rl.Vector2, effective_strip_w: c_int, scr_h: c_int) bool {
     if (effective_strip_w == 0) {
         var tx: c_int = 0;
         var ty: c_int = 0;
@@ -140,7 +135,7 @@ export fn tab_splitter_toggle_hit(mpos: rl.Vector2, effective_strip_w: c_int, sc
         mpos.y >= @as(f32, @floatFromInt(ty)) and mpos.y < @as(f32, @floatFromInt(ty + th));
 }
 
-export fn tab_strip_hit(
+pub fn tab_strip_hit(
     mpos: rl.Vector2,
     strip_w: c_int,
     scr_h: c_int,
@@ -150,7 +145,7 @@ export fn tab_strip_hit(
     tab_title_h: c_int,
     tab_reserved_h: c_int,
     strip_collapsed: bool,
-) callconv(.c) bool {
+) bool {
     if (strip_collapsed) return false;
     if (tab_splitter_toggle_hit(mpos, strip_w, scr_h)) return false;
     const title_h = if (tab_title_h < 1) 1 else tab_title_h;
@@ -192,7 +187,7 @@ export fn tab_strip_hit(
     return true;
 }
 
-export fn tab_strip_draw(
+pub fn tab_strip_draw(
     font: *const rl.Font,
     font_size: f32,
     strip_w: c_int,
@@ -202,27 +197,10 @@ export fn tab_strip_draw(
     active_idx: usize,
     edit_idx: usize,
     edit_buf: [*c]const u8,
-    strip_bg: rl.Color,
-    tab_index_bg: rl.Color,
-    tab_reserved_bg: rl.Color,
-    tab_bg: rl.Color,
-    tab_active: rl.Color,
-    border: rl.Color,
-    fg: rl.Color,
-    edit_bg: rl.Color,
     tab_title_h: c_int,
     tab_reserved_h: c_int,
     strip_collapsed: bool,
-) callconv(.c) void {
-    _ = strip_bg;
-    _ = tab_index_bg;
-    _ = tab_reserved_bg;
-    _ = tab_bg;
-    _ = tab_active;
-    _ = border;
-    _ = fg;
-    _ = edit_bg;
-
+) void {
     if (strip_collapsed) return;
 
     // Keep an unmistakable base layer so tab strip rendering failures are visible.
@@ -343,7 +321,7 @@ export fn tab_strip_draw(
     drawTextSyntheticBold(font.*, plus, plus_pos, icon_font, palette.fg, dpi_scale);
 }
 
-export fn tab_splitter_toggle_draw(
+pub fn tab_splitter_toggle_draw(
     font: *const rl.Font,
     font_size: f32,
     strip_w: c_int,
@@ -351,7 +329,7 @@ export fn tab_splitter_toggle_draw(
     strip_collapsed: bool,
     show: bool,
     fg: rl.Color,
-) callconv(.c) void {
+) void {
     if (!show) return;
     const dpi_scale = currentDpiScale();
     const icon_font = quantizeFontSize(iconFontSize(quantizeFontSize(font_size, dpi_scale.y)), dpi_scale.y);

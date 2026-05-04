@@ -1,18 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const c = @cImport({
-    @cInclude("terminal_ui.h");
-    @cInclude("raylib.h");
-    @cInclude("ghostty/vt.h");
-    @cInclude("ghostty/vt/render.h");
-    @cInclude("config_font.h");
-    @cInclude("stdio.h");
-    @cInclude("string.h");
-    @cInclude("stdlib.h");
-    @cInclude("spawn.h");
-    @cInclude("ctype.h");
-});
+const c = @import("c").c;
 
 const ByteBuffer = struct {
     ptr: [*c]u8,
@@ -322,7 +311,7 @@ fn selectionContainsCell(selection_active: bool, sel_x0: u16, sel_y0: u16, sel_x
 // Exported functions
 // ============================================================================
 
-export fn cell_has_hyperlink(terminal: c.GhosttyTerminal, x: u16, y: u16) bool {
+pub fn cell_has_hyperlink(terminal: c.GhosttyTerminal, x: u16, y: u16) bool {
     var point = std.mem.zeroes(c.GhosttyPoint);
     point.tag = c.GHOSTTY_POINT_TAG_VIEWPORT;
     point.value.coordinate.x = x;
@@ -337,7 +326,7 @@ export fn cell_has_hyperlink(terminal: c.GhosttyTerminal, x: u16, y: u16) bool {
     return c.ghostty_cell_get(cell, c.GHOSTTY_CELL_DATA_HAS_HYPERLINK, &has_hl) == c.GHOSTTY_SUCCESS and has_hl;
 }
 
-export fn open_url_at_cell(terminal: c.GhosttyTerminal, term_cols: u16, term_rows: u16, x: u16, y: u16) bool {
+pub fn open_url_at_cell(terminal: c.GhosttyTerminal, term_cols: u16, term_rows: u16, x: u16, y: u16) bool {
     if (!cell_has_hyperlink(terminal, x, y)) return false;
     var cap = @as(usize, @intCast(term_cols)) * 8 + 64;
     if (cap < 256) cap = 256;
@@ -377,7 +366,7 @@ export fn open_url_at_cell(terminal: c.GhosttyTerminal, term_cols: u16, term_row
     return false;
 }
 
-export fn handle_mouse(pty_fd: c.PtyHandle, encoder: c.GhosttyMouseEncoder, event: c.GhosttyMouseEvent, terminal: c.GhosttyTerminal, cell_width: c_int, cell_height: c_int, pad_left: c_int, pad_top: c_int, pad_right: c_int, pad_bottom: c_int, screen_width: c_int, screen_height: c_int) bool {
+pub fn handle_mouse(pty_fd: c.PtyHandle, encoder: c.GhosttyMouseEncoder, event: c.GhosttyMouseEvent, terminal: c.GhosttyTerminal, cell_width: c_int, cell_height: c_int, pad_left: c_int, pad_top: c_int, pad_right: c_int, pad_bottom: c_int, screen_width: c_int, screen_height: c_int) bool {
     var had_event = false;
     c.ghostty_mouse_encoder_setopt_from_terminal(encoder, terminal);
 
@@ -500,7 +489,7 @@ export fn handle_mouse(pty_fd: c.PtyHandle, encoder: c.GhosttyMouseEncoder, even
     return had_event;
 }
 
-export fn handle_input(pty_fd: c.PtyHandle, encoder: c.GhosttyKeyEncoder, event: c.GhosttyKeyEvent, terminal: c.GhosttyTerminal) bool {
+pub fn handle_input(pty_fd: c.PtyHandle, encoder: c.GhosttyKeyEncoder, event: c.GhosttyKeyEvent, terminal: c.GhosttyTerminal) bool {
     var had_event = false;
     c.ghostty_key_encoder_setopt_from_terminal(encoder, terminal);
 
@@ -632,7 +621,7 @@ fn raylibKeyToGhostty(rl_key: c_int) c.GhosttyKey {
     };
 }
 
-export fn handle_scrollbar(terminal: c.GhosttyTerminal, render_state: c.GhosttyRenderState, dragging: *bool, grid_origin_x: c_int, grid_origin_y: c_int, term_rows: u16, cell_height: c_int, pad_right: c_int) bool {
+pub fn handle_scrollbar(terminal: c.GhosttyTerminal, render_state: c.GhosttyRenderState, dragging: *bool, grid_origin_x: c_int, grid_origin_y: c_int, term_rows: u16, cell_height: c_int, pad_right: c_int) bool {
     const mpos = c.GetMousePosition();
     if (mpos.x < @as(f32, @floatFromInt(grid_origin_x))) {
         if (c.IsMouseButtonReleased(c.MOUSE_BUTTON_LEFT))
@@ -688,7 +677,7 @@ export fn handle_scrollbar(terminal: c.GhosttyTerminal, render_state: c.GhosttyR
     return dragging.*;
 }
 
-export fn copy_viewport_selection_to_clipboard(terminal: c.GhosttyTerminal, term_cols: u16, term_rows: u16, sel_x0: u16, sel_y0: u16, sel_x1: u16, sel_y1: u16) bool {
+pub fn copy_viewport_selection_to_clipboard(terminal: c.GhosttyTerminal, term_cols: u16, term_rows: u16, sel_x0: u16, sel_y0: u16, sel_x1: u16, sel_y1: u16) bool {
     if (terminal == null or term_cols == 0 or term_rows == 0) return false;
     var sx0 = sel_x0;
     var sy0 = sel_y0;
@@ -799,7 +788,7 @@ export fn copy_viewport_selection_to_clipboard(terminal: c.GhosttyTerminal, term
     return true;
 }
 
-export fn paste_host_clipboard_to_terminal(pty_fd: c.PtyHandle, terminal: c.GhosttyTerminal) bool {
+pub fn paste_host_clipboard_to_terminal(pty_fd: c.PtyHandle, terminal: c.GhosttyTerminal) bool {
     const clip = c.GetClipboardText();
     if (clip == null or clip[0] == 0) return false;
     const clip_len = c.strlen(clip);
@@ -818,7 +807,7 @@ export fn paste_host_clipboard_to_terminal(pty_fd: c.PtyHandle, terminal: c.Ghos
     return true;
 }
 
-export fn render_terminal(
+pub fn render_terminal(
     render_state: c.GhosttyRenderState,
     row_iter: c.GhosttyRenderStateRowIterator,
     cells: c.GhosttyRenderStateRowCells,
@@ -1011,7 +1000,7 @@ export fn render_terminal(
     return missing_han_tier;
 }
 
-export fn log_build_info() void {
+pub fn log_build_info() void {
     var simd = false;
     _ = c.ghostty_build_info(c.GHOSTTY_BUILD_INFO_SIMD, &simd);
 
