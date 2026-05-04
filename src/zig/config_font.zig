@@ -448,105 +448,101 @@ export fn config_load_profile(cfg: *c.AppConfig, profile: [*c]const u8) void {
 
 export fn build_terminal_codepoints(set_name: [*c]const u8, out_count: *c_int) [*c]c_int {
     const name = std.mem.sliceTo(set_name, 0);
-    var set_name_lower: [16]u8 = undefined;
-    asciiLowerCopy(&set_name_lower, name);
 
-    const latin_lo: c_int = 0x20;
-    const latin_hi: c_int = 0x7E;
-    const box_lo: c_int = 0x2500;
-    const box_hi: c_int = 0x257F;
-    const powerline_lo: c_int = 0xE0B0;
-    const powerline_hi: c_int = 0xE0D4;
-
-    var range_lo: [3]c_int = undefined;
-    var range_hi: [3]c_int = undefined;
-    var range_count: usize = 0;
-
-    range_lo[0] = latin_lo;
-    range_hi[0] = latin_hi;
-    range_count = 1;
-
-    if (!std.mem.eql(u8, name, "compact") and !std.mem.eql(u8, name, "latin")) {
-        range_lo[range_count] = box_lo;
-        range_hi[range_count] = box_hi;
-        range_count += 1;
-        range_lo[range_count] = powerline_lo;
-        range_hi[range_count] = powerline_hi;
-        range_count += 1;
-    }
-
-    var total: c_int = 0;
-    for (0..range_count) |i| {
-        total += range_hi[i] - range_lo[i] + 1;
-    }
-
-    if (!std.mem.eql(u8, name, "latin")) {
-        const han_tier = ghostling_han_tier_from_codepoint_set(set_name);
-        switch (han_tier) {
-            c.GHOSTLING_HAN_TIER_3500 => total += @as(c_int, @intCast(c.ghostling_han_level1_count)),
-            c.GHOSTLING_HAN_TIER_6500 => {
-                total += @as(c_int, @intCast(c.ghostling_han_level1_count));
-                total += @as(c_int, @intCast(c.ghostling_han_level2_count));
-            },
-            c.GHOSTLING_HAN_TIER_8105 => {
-                total += @as(c_int, @intCast(c.ghostling_han_level1_count));
-                total += @as(c_int, @intCast(c.ghostling_han_level2_count));
-                total += @as(c_int, @intCast(c.ghostling_han_level3_count));
-            },
-            else => {},
-        }
-    }
-
+    const cap: c_int = 65536;
     const alloc = std.heap.c_allocator;
-    const cp_list = alloc.alloc(c_int, @as(usize, @intCast(total))) catch {
+    const cp_list = alloc.alloc(c_int, @as(usize, @intCast(cap))) catch {
         out_count.* = 0;
         return null;
     };
 
     var idx: usize = 0;
-    for (0..range_count) |i| {
-        var cp = range_lo[i];
-        while (cp <= range_hi[i]) : (cp += 1) {
-            cp_list[idx] = cp;
+
+    // Helper to append a range of codepoints
+    const Range = struct {
+        fn append(list: []c_int, n: *usize, lo: c_int, hi: c_int) bool {
+            var c2 = lo;
+            while (c2 <= hi) : (c2 += 1) {
+                if (n.* >= cap) return false;
+                list[n.*] = c2;
+                n.* += 1;
+            }
+            return true;
+        }
+    };
+
+    // Base set shared by all profiles: Latin + symbols + box drawing
+    _ = Range.append(cp_list, &idx, 0x20, 0x7E);
+    _ = Range.append(cp_list, &idx, 0xA0, 0x024F);
+    _ = Range.append(cp_list, &idx, 0x0300, 0x036F);
+    _ = Range.append(cp_list, &idx, 0x2000, 0x206F);
+    _ = Range.append(cp_list, &idx, 0x20A0, 0x20CF);
+    _ = Range.append(cp_list, &idx, 0x2100, 0x214F);
+    _ = Range.append(cp_list, &idx, 0x2190, 0x21FF);
+    _ = Range.append(cp_list, &idx, 0x2200, 0x22FF);
+    _ = Range.append(cp_list, &idx, 0x2300, 0x23FF);
+    _ = Range.append(cp_list, &idx, 0x2460, 0x24FF);
+    _ = Range.append(cp_list, &idx, 0x2500, 0x257F);
+    _ = Range.append(cp_list, &idx, 0x2580, 0x259F);
+    _ = Range.append(cp_list, &idx, 0x25A0, 0x25FF);
+    _ = Range.append(cp_list, &idx, 0x2600, 0x26FF);
+    _ = Range.append(cp_list, &idx, 0x2700, 0x27BF);
+    // zellij/tmux powerline separators (for example U+E0B0) live in PUA
+    _ = Range.append(cp_list, &idx, 0xE0A0, 0xE0D7);
+
+    const han_tier = ghostling_han_tier_from_codepoint_set(set_name);
+
+    if (han_tier != c.GHOSTLING_HAN_TIER_NONE) {
+        // Han tiers intentionally avoid Hiragana/Katakana and keep Chinese punctuation/fullwidth
+        _ = Range.append(cp_list, &idx, 0x3000, 0x303F);
+        _ = Range.append(cp_list, &idx, 0xFF00, 0xFFEF);
+
+        for (0..c.ghostling_han_level1_count) |j| {
+            cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level1[j]));
             idx += 1;
         }
+        if (han_tier >= c.GHOSTLING_HAN_TIER_6500) {
+            for (0..c.ghostling_han_level2_count) |j| {
+                cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level2[j]));
+                idx += 1;
+            }
+        }
+        if (han_tier >= c.GHOSTLING_HAN_TIER_8105) {
+            for (0..c.ghostling_han_level3_count) |j| {
+                cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level3[j]));
+                idx += 1;
+            }
+        }
+    } else if (!std.mem.eql(u8, name, "latin")) {
+        // Compact/full keep CJK core blocks for Chinese/Japanese/Korean text
+        _ = Range.append(cp_list, &idx, 0x3000, 0x30FF);
+        _ = Range.append(cp_list, &idx, 0x31F0, 0x31FF);
+        _ = Range.append(cp_list, &idx, 0x4E00, 0x9FFF);
+        _ = Range.append(cp_list, &idx, 0xFF00, 0xFFEF);
     }
 
     if (!std.mem.eql(u8, name, "latin")) {
-        const han_tier = ghostling_han_tier_from_codepoint_set(set_name);
-        switch (han_tier) {
-            c.GHOSTLING_HAN_TIER_3500 => {
-                for (0..c.ghostling_han_level1_count) |j| {
-                    cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level1[j]));
-                    idx += 1;
-                }
-            },
-            c.GHOSTLING_HAN_TIER_6500 => {
-                for (0..c.ghostling_han_level1_count) |j| {
-                    cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level1[j]));
-                    idx += 1;
-                }
-                for (0..c.ghostling_han_level2_count) |j| {
-                    cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level2[j]));
-                    idx += 1;
-                }
-            },
-            c.GHOSTLING_HAN_TIER_8105 => {
-                for (0..c.ghostling_han_level1_count) |j| {
-                    cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level1[j]));
-                    idx += 1;
-                }
-                for (0..c.ghostling_han_level2_count) |j| {
-                    cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level2[j]));
-                    idx += 1;
-                }
-                for (0..c.ghostling_han_level3_count) |j| {
-                    cp_list[idx] = @as(c_int, @intCast(c.ghostling_han_level3[j]));
-                    idx += 1;
-                }
-            },
-            else => {},
-        }
+        // Common Nerd Font icon blocks used by prompts/TUI statuslines
+        _ = Range.append(cp_list, &idx, 0xE000, 0xE00A);
+        _ = Range.append(cp_list, &idx, 0xE200, 0xE2A9);
+        _ = Range.append(cp_list, &idx, 0xE300, 0xE3E3);
+        _ = Range.append(cp_list, &idx, 0xE5FA, 0xE6B8);
+        _ = Range.append(cp_list, &idx, 0xE700, 0xE8EF);
+        _ = Range.append(cp_list, &idx, 0xEA60, 0xEC1E);
+        _ = Range.append(cp_list, &idx, 0xED00, 0xEFCE);
+        _ = Range.append(cp_list, &idx, 0xF000, 0xF533);
+    }
+
+    if (std.mem.eql(u8, name, "full")) {
+        // Full profile keeps all legacy ranges from the previous default
+        _ = Range.append(cp_list, &idx, 0x3200, 0x32FF);
+        _ = Range.append(cp_list, &idx, 0x3300, 0x33FF);
+        _ = Range.append(cp_list, &idx, 0x3400, 0x4DBF);
+        _ = Range.append(cp_list, &idx, 0xFE00, 0xFE0F);
+        _ = Range.append(cp_list, &idx, 0xFE10, 0xFE1F);
+        _ = Range.append(cp_list, &idx, 0xFE30, 0xFE4F);
+        // Supplementary-plane Nerd Font glyphs (material/icon extras)
+        _ = Range.append(cp_list, &idx, 0xF0001, 0xF1AF0);
     }
 
     out_count.* = @as(c_int, @intCast(idx));
@@ -592,8 +588,15 @@ export fn load_terminal_font(
     if (path_slice.len > 0 and resolveReadableFontPath(path_slice, &resolved_path)) {
         const resolved = std.mem.sliceTo(&resolved_path, 0);
         const f = c.LoadFontEx(@as([*c]const u8, @ptrCast(resolved.ptr)), font_size_px, codepoints, cp_count);
-        if (f.glyphCount > 0 and f.texture.id > 0) return f;
+        if (f.glyphCount > 0 and f.texture.id > 0) {
+            c.TraceLog(c.LOG_INFO, "ghostling: using font \"%s\"", @as([*c]const u8, @ptrCast(resolved.ptr)));
+            return f;
+        }
+        c.TraceLog(c.LOG_WARNING, "ghostling: LoadFontEx failed for \"%s\", using embedded font", @as([*c]const u8, @ptrCast(resolved.ptr)));
+    } else if (path_slice.len > 0) {
+        c.TraceLog(c.LOG_WARNING, "ghostling: font not readable \"%s\", using embedded font", path);
     }
 
+    c.TraceLog(c.LOG_INFO, "ghostling: using embedded fallback font");
     return c.LoadFontFromMemory(".ttf", @as([*c]const u8, @ptrCast(embed)), embed_size, font_size_px, codepoints, cp_count);
 }

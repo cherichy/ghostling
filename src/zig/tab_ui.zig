@@ -9,6 +9,9 @@ const rl = @cImport({
 
 pub const ToggleW: c_int = 22;
 pub const ToggleH: c_int = 28;
+const TAB_NEW_H: c_int = 44;
+const TAB_CLOSE_W: c_int = 28;
+const TAB_INDEX_COL_W: c_int = 28;
 
 fn clampScale(scale: f32) f32 {
     return if (scale > 0.0) scale else 1.0;
@@ -47,23 +50,31 @@ fn drawTextSyntheticBold(font: rl.Font, text: [*c]const u8, pos: rl.Vector2, fon
     rl.DrawTextEx(font, text, p, font_size, 0, fg);
 }
 
-fn truncateToWidth(font: rl.Font, font_size: f32, src: [*c]const u8, max_w: f32, out: [*c]u8, outsz: usize) void {
+fn drawText(font: *const rl.Font, text: [*c]const u8, pos: rl.Vector2, font_size: f32, color: rl.Color) void {
+    rl.DrawTextEx(font.*, text, pos, font_size, 0, color);
+}
+
+fn measureText(font: *const rl.Font, text: [*c]const u8, font_size: f32) rl.Vector2 {
+    return rl.MeasureTextEx(font.*, text, font_size, 0);
+}
+
+fn truncateToWidth(font: *const rl.Font, font_size: f32, src: [*c]const u8, max_w: f32, out: [*c]u8, outsz: usize) void {
     if (max_w < 8.0) {
         if (outsz > 0) out[0] = 0;
         return;
     }
-    if (rl.MeasureTextEx(font, src, font_size, 0).x <= max_w) {
+    if (measureText(font, src, font_size).x <= max_w) {
         _ = rl.snprintf(out, outsz, "%s", src);
         return;
     }
     var tmp: [512]u8 = undefined;
-    _ = rl.snprintf(&tmp, tmp.len, "%s", src);
+    _ = rl.snprintf(@as([*c]u8, @ptrCast(&tmp[0])), tmp.len, "%s", src);
     var n = std.mem.indexOfScalar(u8, &tmp, 0) orelse tmp.len;
     while (n > 0) {
         n -= 1;
         tmp[n] = 0;
-        if (rl.MeasureTextEx(font, &tmp, font_size, 0).x <= max_w) {
-            _ = rl.snprintf(out, outsz, "%s", &tmp);
+        if (measureText(font, @as([*c]const u8, @ptrCast(&tmp[0])), font_size).x <= max_w) {
+            _ = rl.snprintf(out, outsz, "%s", @as([*c]const u8, @ptrCast(&tmp[0])));
             return;
         }
     }
@@ -91,13 +102,13 @@ fn collapsedExpandBounds(scr_h: c_int, tx: *c_int, ty: *c_int, tw: *c_int, th: *
     ty.* = @divTrunc(scr_h, 2) - @divTrunc(th.*, 2);
 }
 
-export fn tab_splitter_hit(mpos: rl.Vector2, strip_w: c_int, scr_h: c_int) bool {
+export fn tab_splitter_hit(mpos: rl.Vector2, strip_w: c_int, scr_h: c_int) callconv(.c) bool {
     _ = scr_h;
     return mpos.x >= @as(f32, @floatFromInt(strip_w)) and
         mpos.x <= @as(f32, @floatFromInt(strip_w + 8));
 }
 
-export fn tab_splitter_toggle_hit(mpos: rl.Vector2, effective_strip_w: c_int, scr_h: c_int) bool {
+export fn tab_splitter_toggle_hit(mpos: rl.Vector2, effective_strip_w: c_int, scr_h: c_int) callconv(.c) bool {
     if (effective_strip_w == 0) {
         var tx: c_int = 0;
         var ty: c_int = 0;
@@ -126,7 +137,7 @@ export fn tab_strip_hit(
     tab_title_h: c_int,
     tab_reserved_h: c_int,
     strip_collapsed: bool,
-) bool {
+) callconv(.c) bool {
     if (strip_collapsed) return false;
     if (tab_splitter_toggle_hit(mpos, strip_w, scr_h)) return false;
     const title_h = if (tab_title_h < 1) 1 else tab_title_h;
@@ -137,7 +148,7 @@ export fn tab_strip_hit(
     act.* = 0;
     if (mpos.x < 0 or mpos.x >= @as(f32, @floatFromInt(strip_w))) return false;
 
-    const new_y0 = scr_h - 44;
+    const new_y0 = scr_h - TAB_NEW_H;
     if (mpos.y >= @as(f32, @floatFromInt(new_y0))) {
         act.* = 2;
         return true;
@@ -160,7 +171,7 @@ export fn tab_strip_hit(
     idx.* = @as(usize, @intCast(row));
     const y_in_tab = @as(c_int, @intFromFloat(mpos.y)) - row * row_h;
     const in_title = y_in_tab < title_h;
-    if (mpos.x >= @as(f32, @floatFromInt(strip_w - 28)) and in_title) {
+    if (mpos.x >= @as(f32, @floatFromInt(strip_w - TAB_CLOSE_W)) and in_title) {
         act.* = 1;
     } else {
         act.* = 0;
@@ -169,11 +180,11 @@ export fn tab_strip_hit(
 }
 
 export fn tab_strip_draw(
-    font: rl.Font,
+    font: *const rl.Font,
     font_size: f32,
     strip_w: c_int,
     scr_h: c_int,
-    tabs: [*c]?*rl.Tab,
+    tabs: [*c]const [*c]rl.Tab,
     n_tabs: usize,
     active_idx: usize,
     edit_idx: usize,
@@ -189,101 +200,154 @@ export fn tab_strip_draw(
     tab_title_h: c_int,
     tab_reserved_h: c_int,
     strip_collapsed: bool,
-) void {
-    _ = edit_buf;
+) callconv(.c) void {
+    _ = strip_bg;
+    _ = tab_index_bg;
+    _ = tab_reserved_bg;
+    _ = tab_bg;
+    _ = tab_active;
+    _ = border;
+    _ = fg;
+    _ = edit_bg;
+
     if (strip_collapsed) return;
 
+    const fixed_strip_bg = rl.Color{ .r = 45, .g = 45, .b = 48, .a = 255 };
+    const fixed_tab_index_bg = rl.Color{ .r = 40, .g = 40, .b = 44, .a = 255 };
+    const fixed_tab_reserved_bg = rl.Color{ .r = 38, .g = 38, .b = 42, .a = 255 };
+    const fixed_tab_bg = rl.Color{ .r = 55, .g = 55, .b = 58, .a = 255 };
+    const fixed_tab_active = rl.Color{ .r = 70, .g = 100, .b = 140, .a = 255 };
+    const fixed_border = rl.Color{ .r = 80, .g = 80, .b = 85, .a = 255 };
+    const fixed_fg = rl.Color{ .r = 220, .g = 220, .b = 220, .a = 255 };
+    const fixed_edit_bg = rl.Color{ .r = 50, .g = 70, .b = 95, .a = 255 };
+
+    // Keep an unmistakable base layer so tab strip rendering failures are visible.
+    // This also avoids a visually "black" strip when per-tab drawing is skipped.
+    rl.DrawRectangle(0, 0, strip_w, scr_h, fixed_strip_bg);
+    rl.DrawRectangle(strip_w - 1, 0, 1, scr_h, fixed_border);
+
     const dpi_scale = currentDpiScale();
-    const qfont = quantizeFontSize(font_size, dpi_scale.y);
+    const text_font = if (font_size > 0.0) font_size else 12.0;
 
     const title_h = if (tab_title_h < 1) 1 else tab_title_h;
     const reserved_h = if (tab_reserved_h < 0) 0 else tab_reserved_h;
     const row_h = title_h + reserved_h;
     if (row_h < 1) return;
 
-    const ix: c_int = 28;
-    const close_w: c_int = 28;
+    var ix: c_int = TAB_INDEX_COL_W;
+    if (ix >= strip_w - @as(c_int, @intCast(TAB_CLOSE_W)) - 8)
+        ix = if (strip_w > 40) 20 else 0;
 
-    rl.DrawRectangle(0, 0, strip_w, scr_h, strip_bg);
-    rl.DrawRectangle(strip_w - 1, 0, 1, scr_h, border);
+    const new_y0 = scr_h - TAB_NEW_H;
+    var max_vis: usize = if (new_y0 > 0) @intCast(@divTrunc(new_y0, row_h)) else 1;
+    if (max_vis == 0) max_vis = 1;
 
-    const new_y0 = scr_h - 44;
-    const max_vis = if (new_y0 > 0) @as(usize, @intCast(@divTrunc(new_y0, row_h))) else 1;
+    const label_max_w: f32 = @as(f32, @floatFromInt(strip_w - ix - @as(c_int, @intCast(TAB_CLOSE_W)) - 10));
+    const label_max_w_clamped = if (label_max_w < 20.0) 20.0 else label_max_w;
 
     var i: usize = 0;
     while (i < n_tabs and i < max_vis) : (i += 1) {
         const y0 = @as(c_int, @intCast(i * @as(usize, @intCast(row_h))));
         const editing = (edit_idx == i);
-        const tab_ptr = tabs[i] orelse continue;
+        const tab_ptr = tabs[i];
+        if (tab_ptr == null) continue;
 
-        rl.DrawRectangle(0, y0, ix, row_h, tab_index_bg);
-        rl.DrawRectangle(ix - 1, y0, 1, row_h, border);
+        rl.DrawRectangle(0, y0, ix, row_h, fixed_tab_index_bg);
+        rl.DrawRectangle(ix - 1, y0, 1, row_h, fixed_border);
 
-        const title_bg = if (editing) edit_bg else if (i == active_idx) tab_active else tab_bg;
+        const title_bg = if (editing) fixed_edit_bg else if (i == active_idx) fixed_tab_active else fixed_tab_bg;
         rl.DrawRectangle(ix, y0, strip_w - ix - 1, title_h, title_bg);
 
         const y_res = y0 + title_h;
-        rl.DrawRectangle(ix, y_res, strip_w - ix - 1, reserved_h, tab_reserved_bg);
-        rl.DrawRectangle(ix, y0 + title_h - 1, strip_w - ix - 1, 1, border);
-        rl.DrawRectangle(0, y_res + reserved_h - 1, strip_w - 1, 1, border);
+        rl.DrawRectangle(ix, y_res, strip_w - ix - 1, reserved_h, fixed_tab_reserved_bg);
+        rl.DrawRectangle(ix, y0 + title_h - 1, strip_w - ix - 1, 1, fixed_border);
+        rl.DrawRectangle(0, y_res + reserved_h - 1, strip_w - 1, 1, fixed_border);
 
-        var num_buf: [8]u8 = undefined;
-        const num_slice = std.fmt.bufPrint(&num_buf, "{}", .{i + 1}) catch "?";
-        const ns = rl.MeasureTextEx(font, @as([*c]const u8, @ptrCast(num_slice.ptr)), qfont, 0);
+        // Tab index number
+        var num_buf: [8]u8 = std.mem.zeroes([8]u8);
+        _ = rl.snprintf(@as([*c]u8, @ptrCast(&num_buf[0])), num_buf.len, "%zu", i + 1);
+        const num_ptr: [*c]const u8 = @ptrCast(&num_buf[0]);
+        const ns = measureText(font, num_ptr, text_font);
         var nx = (@as(f32, @floatFromInt(ix)) - ns.x) * 0.5;
         if (nx < 2.0) nx = 2.0;
         const ny = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(row_h)) - ns.y) * 0.5;
         const num_pos = rl.Vector2{ .x = snapToPhysical(nx, dpi_scale.x), .y = snapToPhysical(ny, dpi_scale.y) };
         if (i == active_idx) {
-            drawTextSyntheticBold(font, @as([*c]const u8, @ptrCast(num_slice.ptr)), num_pos, qfont, fg, dpi_scale);
+            drawTextSyntheticBold(font.*, num_ptr, num_pos, text_font, fixed_fg, dpi_scale);
         } else {
-            rl.DrawTextEx(font, @as([*c]const u8, @ptrCast(num_slice.ptr)), num_pos, qfont, 0, fg);
+            drawText(font, num_ptr, num_pos, text_font, fixed_fg);
         }
 
-        var title_buf: [256]u8 = [_]u8{0} ** 256;
-        rl.tab_display_title(tab_ptr, i + 1, &title_buf, title_buf.len);
-
-        if (title_buf[0] == 0) {
-            _ = rl.snprintf(&title_buf, title_buf.len, "tab %zu", i + 1);
+        // Tab title
+        var line: [512]u8 = std.mem.zeroes([512]u8);
+        if (editing and edit_buf != null) {
+            _ = rl.snprintf(@as([*c]u8, @ptrCast(&line[0])), line.len, "%s", edit_buf);
+        } else {
+            var raw: [256]u8 = std.mem.zeroes([256]u8);
+            rl.tab_display_title(tab_ptr, i + 1, @as([*c]u8, @ptrCast(&raw[0])), raw.len);
+            truncateToWidth(font, text_font, @as([*c]const u8, @ptrCast(&raw[0])), label_max_w_clamped, @as([*c]u8, @ptrCast(&line[0])), line.len);
         }
-        const ts = rl.MeasureTextEx(font, &title_buf, qfont, 0);
+
+        const line_ptr: [*c]const u8 = @ptrCast(&line[0]);
+        const ts = measureText(font, line_ptr, text_font);
         const tx = @as(f32, @floatFromInt(ix)) + 6.0;
         const ty = @as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(title_h)) - ts.y) * 0.5;
-        rl.DrawTextEx(font, &title_buf, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
+        const title_pos = rl.Vector2{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) };
+        drawText(font, line_ptr, title_pos, text_font, fixed_fg);
 
+        // Agent status in reserved area
         if (reserved_h > 0) {
-            const agent_label = rl.ghostling_agent_state_label(&tab_ptr.agent_state);
-            const als = rl.MeasureTextEx(font, agent_label, qfont, 0);
-            const ay = @as(f32, @floatFromInt(y_res)) + (@as(f32, @floatFromInt(reserved_h)) - als.y) * 0.5;
-            rl.DrawTextEx(font, agent_label, .{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(ay, dpi_scale.y) }, qfont, 0, fg);
+            var status_raw: [96]u8 = std.mem.zeroes([96]u8);
+            const agent_state = &tab_ptr.*.agent_state;
+            const agent_name = rl.ghostling_agent_state_agent(agent_state);
+            if (agent_name != null and agent_name[0] != 0) {
+                _ = rl.snprintf(@as([*c]u8, @ptrCast(&status_raw[0])), status_raw.len, "[%s]: %s", agent_name, rl.ghostling_agent_state_label(agent_state));
+            } else {
+                _ = rl.snprintf(@as([*c]u8, @ptrCast(&status_raw[0])), status_raw.len, "%s", rl.ghostling_agent_state_label(agent_state));
+            }
+
+            var status_line: [96]u8 = std.mem.zeroes([96]u8);
+            truncateToWidth(font, text_font, @as([*c]const u8, @ptrCast(&status_raw[0])), label_max_w_clamped, @as([*c]u8, @ptrCast(&status_line[0])), status_line.len);
+
+            const status_ptr: [*c]const u8 = @ptrCast(&status_line[0]);
+            const ss = measureText(font, status_ptr, text_font);
+            const sy = @as(f32, @floatFromInt(y_res)) + (@as(f32, @floatFromInt(reserved_h)) - ss.y) * 0.5;
+            const status_pos = rl.Vector2{ .x = snapToPhysical(tx, dpi_scale.x), .y = snapToPhysical(sy, dpi_scale.y) };
+            drawText(font, status_ptr, status_pos, text_font, fixed_fg);
         }
 
-        const x_str = "×";
-        const xs = rl.MeasureTextEx(font, x_str, qfont, 0);
-        const cx = @as(f32, @floatFromInt(strip_w - close_w)) + ((@as(f32, @floatFromInt(close_w)) - xs.x) * 0.5);
-        rl.DrawTextEx(font, x_str, .{ .x = snapToPhysical(cx, dpi_scale.x), .y = snapToPhysical(ty, dpi_scale.y) }, qfont, 0, fg);
+        // Close button
+        const x_str: [*c]const u8 = "x";
+        const x_font_size: c_int = @max(8, @as(c_int, @intFromFloat(text_font)));
+        const xs = measureText(font, x_str, @floatFromInt(x_font_size));
+        const cx = @as(f32, @floatFromInt(strip_w - @as(c_int, @intCast(TAB_CLOSE_W)))) + ((@as(f32, @floatFromInt(@as(c_int, @intCast(TAB_CLOSE_W)))) - xs.x) * 0.5);
+        const close_x = @as(c_int, @intFromFloat(snapToPhysical(cx, dpi_scale.x)));
+        const close_y = @as(c_int, @intFromFloat(snapToPhysical(@as(f32, @floatFromInt(y0)) + (@as(f32, @floatFromInt(title_h)) - xs.y) * 0.5, dpi_scale.y)));
+        drawText(font, x_str, .{ .x = @floatFromInt(close_x), .y = @floatFromInt(close_y) }, @floatFromInt(x_font_size), fixed_fg);
     }
 
-    rl.DrawRectangle(0, new_y0, strip_w - 1, 44, tab_bg);
-    rl.DrawRectangle(0, new_y0, strip_w - 1, 1, border);
-    const plus = "+";
-    const icon_font = quantizeFontSize(iconFontSize(qfont), dpi_scale.y);
-    const ps = rl.MeasureTextEx(font, plus, icon_font, 0);
-    drawTextSyntheticBold(font, plus, .{
+    // New tab button
+    rl.DrawRectangle(0, new_y0, strip_w - 1, TAB_NEW_H, fixed_tab_bg);
+    rl.DrawRectangle(0, new_y0, strip_w - 1, 1, fixed_border);
+    const plus: [*c]const u8 = "+";
+    const icon_font = quantizeFontSize(iconFontSize(text_font), dpi_scale.y);
+    const ps = measureText(font, plus, icon_font);
+    const plus_pos = rl.Vector2{
         .x = snapToPhysical((@as(f32, @floatFromInt(strip_w)) - ps.x) * 0.5, dpi_scale.x),
-        .y = snapToPhysical(@as(f32, @floatFromInt(new_y0)) + (@as(f32, @floatFromInt(44)) - ps.y) * 0.5, dpi_scale.y),
-    }, icon_font, fg, dpi_scale);
+        .y = snapToPhysical(@as(f32, @floatFromInt(new_y0)) + (@as(f32, @floatFromInt(TAB_NEW_H)) - ps.y) * 0.5, dpi_scale.y),
+    };
+    drawTextSyntheticBold(font.*, plus, plus_pos, icon_font, fixed_fg, dpi_scale);
 }
 
 export fn tab_splitter_toggle_draw(
-    font: rl.Font,
+    font: *const rl.Font,
     font_size: f32,
     strip_w: c_int,
     scr_h: c_int,
     strip_collapsed: bool,
     show: bool,
     fg: rl.Color,
-) void {
+) callconv(.c) void {
     if (!show) return;
     const dpi_scale = currentDpiScale();
     const icon_font = quantizeFontSize(iconFontSize(quantizeFontSize(font_size, dpi_scale.y)), dpi_scale.y);
@@ -293,12 +357,12 @@ export fn tab_splitter_toggle_draw(
         var tw: c_int = 0;
         var th: c_int = 0;
         collapsedExpandBounds(scr_h, &tx, &ty, &tw, &th);
-        const ch = ">";
-        const cs = rl.MeasureTextEx(font, ch, icon_font, 0);
-        rl.DrawTextEx(font, ch, .{
+        const ch: [*c]const u8 = ">";
+        const cs = measureText(font, ch, icon_font);
+        drawText(font, ch, .{
             .x = snapToPhysical(@as(f32, @floatFromInt(tx)) + (@as(f32, @floatFromInt(tw)) - cs.x) * 0.5, dpi_scale.x),
             .y = snapToPhysical(@as(f32, @floatFromInt(ty)) + (@as(f32, @floatFromInt(th)) - cs.y) * 0.5, dpi_scale.y),
-        }, icon_font, 0, fg);
+        }, icon_font, fg);
         return;
     }
     var tx: c_int = 0;
@@ -306,10 +370,10 @@ export fn tab_splitter_toggle_draw(
     var tw: c_int = 0;
     var th: c_int = 0;
     splitterToggleBounds(strip_w, scr_h, &tx, &ty, &tw, &th);
-    const lt = "<";
-    const ls = rl.MeasureTextEx(font, lt, icon_font, 0);
-    rl.DrawTextEx(font, lt, .{
+    const lt: [*c]const u8 = "<";
+    const ls = measureText(font, lt, icon_font);
+    drawText(font, lt, .{
         .x = snapToPhysical(@as(f32, @floatFromInt(tx)) + (@as(f32, @floatFromInt(tw)) - ls.x) * 0.5, dpi_scale.x),
         .y = snapToPhysical(@as(f32, @floatFromInt(ty)) + (@as(f32, @floatFromInt(th)) - ls.y) * 0.5, dpi_scale.y),
-    }, icon_font, 0, fg);
+    }, icon_font, fg);
 }

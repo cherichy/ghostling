@@ -78,9 +78,10 @@ export fn pty_read_unix(
 ) c_int {
     var buf: [4096]u8 = undefined;
     while (true) {
-        const n = c.read(pty_fd, @as([*c]u8, @ptrCast(&buf)), buf.len);
+        const buf_ptr: [*c]u8 = @ptrCast(&buf[0]);
+        const n = c.read(pty_fd, buf_ptr, buf.len);
         if (n > 0) {
-            if (sink) |s| s(sink_userdata, @as([*c]const u8, @ptrCast(&buf)), @as(usize, @intCast(n)));
+            if (sink) |s| s(sink_userdata, @ptrCast(buf_ptr), @as(usize, @intCast(n)));
         } else if (n == 0) {
             return 1;
         } else {

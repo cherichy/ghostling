@@ -122,7 +122,7 @@ bool tab_strip_hit(Vector2 mpos, int strip_w, int scr_h, size_t n_tabs,
                    size_t *idx, TabStripAction *act, int tab_title_h,
                    int tab_reserved_h, bool strip_collapsed);
 
-void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
+void tab_strip_draw(const Font *font, float font_size, int strip_w, int scr_h,
                     Tab *const *tabs, size_t n_tabs, size_t active_idx,
                     size_t edit_idx, const char *edit_buf, Color strip_bg,
                     Color tab_index_bg, Color tab_reserved_bg, Color tab_bg,
@@ -130,7 +130,7 @@ void tab_strip_draw(Font font, float font_size, int strip_w, int scr_h,
                     int tab_title_h, int tab_reserved_h, bool strip_collapsed);
 
 /** Draw `<` / `>` on top of splitter highlight etc.; call after tab strip + splitter line. */
-void tab_splitter_toggle_draw(Font font, float font_size, int strip_w, int scr_h,
+void tab_splitter_toggle_draw(const Font *font, float font_size, int strip_w, int scr_h,
                               bool strip_collapsed, bool show, Color fg);
 
 #endif

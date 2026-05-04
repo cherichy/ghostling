@@ -63,21 +63,22 @@ pub fn build(b: *std.Build) void {
         c_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
     }
 
+    // Only compile C files that haven't been migrated to Zig yet
+    // pty_win.c is still needed for Windows ConPTY support
     const c_files: []const []const u8 = if (target.result.os.tag == .windows) &.{
         "src/c/pty_win.c",
-        "src/c/terminal_ui.c",
-    } else &.{
-        "src/c/terminal_ui.c",
-    };
+    } else &.{};
     const c_flags: []const []const u8 = if (target.result.os.tag == .linux)
         &.{ "-std=c11", "-D_DEFAULT_SOURCE" }
     else
         &.{"-std=c11"};
-    c_mod.addCSourceFiles(.{
-        .root = b.path(""),
-        .files = c_files,
-        .flags = c_flags,
-    });
+    if (c_files.len > 0) {
+        c_mod.addCSourceFiles(.{
+            .root = b.path(""),
+            .files = c_files,
+            .flags = c_flags,
+        });
+    }
 
     const osc52_mod = b.createModule(.{
         .root_source_file = b.path("src/zig/osc52_clipboard.zig"),
@@ -182,6 +183,21 @@ pub fn build(b: *std.Build) void {
         .root_module = tab_ui_mod,
     });
 
+    const terminal_ui_mod = b.createModule(.{
+        .root_source_file = b.path("src/zig/terminal_ui.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    terminal_ui_mod.addIncludePath(ghostty_dep.path("include"));
+    terminal_ui_mod.addIncludePath(b.path("src/c"));
+    if (target.result.os.tag == .macos) {
+        terminal_ui_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+    }
+    const terminal_ui_obj = b.addObject(.{
+        .name = "terminal_ui",
+        .root_module = terminal_ui_mod,
+    });
+
     const ghostling = b.addExecutable(.{
         .name = "ghostling",
         .root_module = c_mod,
@@ -198,6 +214,7 @@ pub fn build(b: *std.Build) void {
     ghostling.addObject(tab_runtime_obj);
     ghostling.addObject(pty_obj);
     ghostling.addObject(tab_ui_obj);
+    ghostling.addObject(terminal_ui_obj);
 
     const win_gnu = target.result.os.tag == .windows and target.result.abi == .gnu;
     const raylib_loc = raylib_prefix.len > 0 or raylib_lib.len > 0;
